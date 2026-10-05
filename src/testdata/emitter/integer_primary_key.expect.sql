@@ -1,0 +1,6 @@
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE "book" (
+  "id" INTEGER PRIMARY KEY AUTOINCREMENT,
+  "title" TEXT NOT NULL
+) STRICT;

@@ -73,7 +73,7 @@ test "empty schema emits foreign key setup only" {
     defer output.deinit();
 
     try emit(.{}, &output.writer);
-    try std.testing.expectEqualStrings("PRAGMA foreign_keys = ON;\n", output.written());
+    try std.testing.expectEqualStrings(@embedFile("testdata/emitter/empty_schema.expect.sql"), output.written());
 }
 
 test "empty tables use SQL names and preserve schema order" {
@@ -85,7 +85,7 @@ test "empty tables use SQL names and preserve schema order" {
         .{ .dsl_name = "Author", .sql_name = "author" },
     } }, &output.writer);
     try std.testing.expectEqualStrings(
-        "PRAGMA foreign_keys = ON;\n\nCREATE TABLE \"books\" (\n) STRICT;\n\nCREATE TABLE \"author\" (\n) STRICT;\n",
+        @embedFile("testdata/emitter/empty_tables.expect.sql"),
         output.written(),
     );
 }
@@ -99,7 +99,7 @@ test "SQL identifiers preserve spelling and escape quotes" {
         .{ .dsl_name = "Writer", .sql_name = "Writer\"ID" },
     } }, &output.writer);
     try std.testing.expectEqualStrings(
-        "PRAGMA foreign_keys = ON;\n\nCREATE TABLE \"select\" (\n) STRICT;\n\nCREATE TABLE \"Writer\"\"ID\" (\n) STRICT;\n",
+        @embedFile("testdata/emitter/quoted_tables.expect.sql"),
         output.written(),
     );
 }
@@ -109,7 +109,7 @@ test "virtual relationships produce no SQL" {
     defer output.deinit();
 
     try emit(.{ .relationships = &.{.{}} }, &output.writer);
-    try std.testing.expectEqualStrings("PRAGMA foreign_keys = ON;\n", output.written());
+    try std.testing.expectEqualStrings(@embedFile("testdata/emitter/empty_schema.expect.sql"), output.written());
 }
 
 test "columns emit every storage type with nullability and commas" {
@@ -127,11 +127,7 @@ test "columns emit every storage type with nullability and commas" {
         },
     }} }, &output.writer);
     try std.testing.expectEqualStrings(
-        "PRAGMA foreign_keys = ON;\n\nCREATE TABLE \"book\" (\n" ++
-            "  \"page_count\" INTEGER NOT NULL,\n" ++
-            "  \"price\" REAL,\n" ++
-            "  \"title\" TEXT NOT NULL,\n" ++
-            "  \"cover\" BLOB\n) STRICT;\n",
+        @embedFile("testdata/emitter/columns.expect.sql"),
         output.written(),
     );
 }
@@ -146,7 +142,7 @@ test "single column uses its quoted SQL name without a trailing comma" {
         .columns = &.{.{ .dsl_name = "title", .sql_name = "Display\"Name", .type = .text }},
     }} }, &output.writer);
     try std.testing.expectEqualStrings(
-        "PRAGMA foreign_keys = ON;\n\nCREATE TABLE \"book\" (\n  \"Display\"\"Name\" TEXT NOT NULL\n) STRICT;\n",
+        @embedFile("testdata/emitter/quoted_column.expect.sql"),
         output.written(),
     );
 }
@@ -164,9 +160,7 @@ test "single integer primary key generates IDs" {
         },
     }} }, &output.writer);
     try std.testing.expectEqualStrings(
-        "PRAGMA foreign_keys = ON;\n\nCREATE TABLE \"book\" (\n" ++
-            "  \"id\" INTEGER PRIMARY KEY AUTOINCREMENT,\n" ++
-            "  \"title\" TEXT NOT NULL\n) STRICT;\n",
+        @embedFile("testdata/emitter/integer_primary_key.expect.sql"),
         output.written(),
     );
 }
@@ -180,14 +174,12 @@ test "non-integer primary keys are required and do not generate IDs" {
             .sql_name = "entry",
             .columns = &.{.{ .dsl_name = "key", .sql_name = "key", .type = storage_type, .primary_key = true }},
         }} }, &output.writer);
-        const sql_type = switch (storage_type) {
-            .text => "TEXT",
-            .real => "REAL",
-            .blob => "BLOB",
+        const expected = switch (storage_type) {
+            .text => @embedFile("testdata/emitter/text_primary_key.expect.sql"),
+            .real => @embedFile("testdata/emitter/real_primary_key.expect.sql"),
+            .blob => @embedFile("testdata/emitter/blob_primary_key.expect.sql"),
             .integer => unreachable,
         };
-        const expected = try std.fmt.allocPrint(std.testing.allocator, "PRAGMA foreign_keys = ON;\n\nCREATE TABLE \"entry\" (\n  \"key\" {s} NOT NULL PRIMARY KEY\n) STRICT;\n", .{sql_type});
-        defer std.testing.allocator.free(expected);
         try std.testing.expectEqualStrings(expected, output.written());
     }
 }
@@ -206,11 +198,7 @@ test "composite primary key preserves column order and quotes SQL names" {
         },
     }} }, &output.writer);
     try std.testing.expectEqualStrings(
-        "PRAGMA foreign_keys = ON;\n\nCREATE TABLE \"entry\" (\n" ++
-            "  \"tenant\"\"id\" INTEGER NOT NULL,\n" ++
-            "  \"value\" TEXT NOT NULL,\n" ++
-            "  \"select\" TEXT NOT NULL,\n" ++
-            "  PRIMARY KEY (\"tenant\"\"id\", \"select\")\n) STRICT;\n",
+        @embedFile("testdata/emitter/composite_primary_key.expect.sql"),
         output.written(),
     );
 }
