@@ -253,9 +253,15 @@ Example {
 }
 ```
 
-**Open naming details:** acronym handling (`URLValue`, `HTTPServer`), generated
-index/trigger names, and explicit naming of a primary-key constraint need final
-rules. Do not silently depend on those unspecified spellings.
+Name conversion inserts an underscore before an uppercase letter following a
+lowercase letter or digit, and at an acronym boundary before the final uppercase
+letter followed by lowercase. Then ASCII letters are lowercased: `HTTPServer`
+becomes `http_server`, `URLValue` becomes `url_value`, and `tenantId` becomes
+`tenant_id`. Existing underscores are preserved.
+
+**Open naming details:** generated index/trigger names and explicit naming of a
+primary-key constraint need final rules. Embedded backticks in `#name` arguments
+have no settled escape convention; the supported-subset resolver rejects them.
 
 ## 6. Built-in types and nullability
 
@@ -403,9 +409,10 @@ metadata json('{}')
 Double-quoted DSL strings are not supported. Quotes occurring inside raw SQL are
 SQLite syntax and are unaffected by this rule.
 
-**Open detail:** the escape rules for ordinary single-quoted strings were not
-settled. Backslash escapes and SQL-style quote doubling must not be assumed to be
-accepted yet. Raw strings cover content that contains quotes or backslashes.
+An embedded single quote is written as two single quotes (SQL-style doubling):
+`'It''s ready'` decodes to `It's ready`. Backslashes are literal, not escapes;
+`'C:\books'` preserves its backslash. Raw strings are another way to include
+quotes and backslashes literally.
 
 ### Raw strings
 
@@ -1621,6 +1628,28 @@ ordering, validation against an actual SQLite connection, and whether compiler
 errors guarantee no partial output still need design. Prefer deterministic output
 and fail-before-write behavior.
 
+### Current supported-subset resolver
+
+`src/resolver.zig` resolves manually constructed `parsed.Schema` values; no parser
+is implemented. It supports tables, stored fields, `int`/`real`/`text`/`blob`,
+nullability, defaults, primary keys, `#name`, and field-level `#allow reuse`.
+Unknown type names are errors; reusable type declarations are not modeled yet.
+Literal integer defaults also fit `real`; other literal kinds must match their
+storage type. Raw SQL defaults are trusted, not SQL-syntax-validated.
+
+Ordinary strings use quote doubling with literal backslashes. Single-line
+hash-delimited raw strings preserve content literally. Multiline strings are
+explicitly rejected until the remaining multiline rules are settled. Backtick
+arguments must have exactly one opening and closing delimiter; embedded backticks
+are rejected rather than assigned an invented escape convention.
+
+The API is `resolve(allocator, parsed_schema) -> Allocator.Error!Result`.
+`Result.diagnostic` contains the first semantic error category, source span, and
+static message. `Result.schema` contains an owned schema; call its `deinit()` once
+when done. All arrays and strings are owned, so parsed input need not outlive the
+result. Failure releases all partial allocations. Out-of-memory is separate from
+semantic diagnostics. Resolution never emits partial SQL.
+
 ## 21. Consolidated example
 
 ```text
@@ -1838,7 +1867,7 @@ validation, Unicode collation, timezone conversion, or automatic query loading.
 - SQL reserved words and embedded identifier quote characters.
 - ASCII case-insensitive identifier collisions despite exact `#name` spelling.
 - Raw SQL that references an old name after a field override: no rewriting.
-- Acronym normalization once its algorithm is chosen.
+- Acronym normalization: `HTTPServer` → `http_server`, `URLValue` → `url_value`.
 
 ### Enforcement
 
@@ -1884,9 +1913,11 @@ validation, Unicode collation, timezone conversion, or automatic query loading.
 
 These are not new agreed requirements; they are gaps worth resolving explicitly.
 
-1. Exact ordinary-string escaping and delimiter/content grammar.
+1. Remaining delimiter/content grammar, including embedded backticks and multiline
+   edge cases. Ordinary-string quote doubling and literal backslashes are settled.
 2. Indentation/tabs, statement separators, and expression continuation grammar.
-3. Precise camelCase/acronym conversion and generated key/index/trigger naming.
+3. Generated key/index/trigger naming. Ordinary camelCase/acronym conversion is
+   settled in section 5.
 4. Canonical generated key ordering for order-independent unnamed connections.
 5. Full validator catalog for `::`, especially email and nonempty-string semantics.
 6. Exact date/datetime format, precision, calendar validity checks, and accepted range.
