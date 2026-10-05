@@ -56,6 +56,11 @@ pub const Default = union(enum) {
     raw_sql: []const u8,
 };
 
+pub const UniqueConstraint = struct {
+    name: ?[]const u8 = null,
+    nulls: enum { distinct, equal } = .distinct,
+};
+
 /// A stored column. Semantic resolution chooses its logical/storage type.
 pub const Column = struct {
     dsl_name: []const u8,
@@ -69,6 +74,7 @@ pub const Column = struct {
     default: ?Default = null,
     /// Explicit field checks in source order; builtin checks are emitted separately.
     checks: []const Expression = &.{},
+    unique_constraints: []const UniqueConstraint = &.{},
 };
 
 /// Virtual relationship metadata; never a stored column.

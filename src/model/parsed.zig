@@ -99,9 +99,16 @@ pub const Default = union(enum) {
 /// `of` members borrow source tokens, with bare words or backtick delimiters.
 /// A `name` argument includes its backtick delimiters; it is not yet decoded.
 /// The span covers the whole directive, including its argument.
+pub const NativeUnique = struct {
+    /// Empty for field scope; reserved for future composite constraints.
+    fields: []const Token = &.{},
+    options: []const Directive = &.{},
+};
+
 pub const Directive = struct {
     kind: union(enum) {
         name: Token,
+        native_unique: NativeUnique,
         allow_reuse,
         /// Field `? expr`, table `?? expr`, or either scope's `#check expr`.
         check: Expression,

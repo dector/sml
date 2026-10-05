@@ -25,6 +25,7 @@ pub const Category = enum {
     invalid_enum,
     unsupported_multiline,
     invalid_check,
+    invalid_unique,
 };
 
 pub const Diagnostic = struct {
@@ -81,6 +82,9 @@ const Context = struct {
                 result.name = token;
             },
             .check => {},
+            .native_unique => {
+                if (table) return self.fail(.invalid_directive_scope, directive.span, "Table composite uniqueness is unsupported; deferred");
+            },
             .of => {
                 if (table) return self.fail(.invalid_directive_scope, directive.span, "#of is field-only");
             },
@@ -182,6 +186,26 @@ const Context = struct {
                         !@import("enumeration.zig").contains(enum_values.items, value.?.text))
                         return self.fail(.invalid_default, token.span, "enum default is not in its allowed set");
                 }
+                var uniques: std.ArrayList(resolved.UniqueConstraint) = .empty;
+                for (field.directives) |directive| {
+                    if (directive.kind != .native_unique) continue;
+                    const unique = directive.kind.native_unique;
+                    if (unique.fields.len != 0) return self.fail(.invalid_unique, directive.span, "Field uniqueness cannot specify field references");
+                    var constraint_name: ?[]const u8 = null;
+                    for (unique.options) |option| {
+                        if (option.kind != .name) return self.fail(.invalid_unique, option.span, "Only #name is supported in unique options");
+                        if (constraint_name != null) return self.fail(.duplicate_directive, option.span, "duplicate #name in unique options");
+                        constraint_name = try self.name(field.name, option.kind.name);
+                    }
+                    if (uniques.items.len != 0) return self.fail(.duplicate_directive, directive.span, "duplicate field uniqueness declaration");
+                    if (constraint_name) |n| for (columns[0..j]) |previous| {
+                        for (previous.unique_constraints) |prior| {
+                            if (prior.name) |p| if (std.ascii.eqlIgnoreCase(n, p))
+                                return self.fail(.sql_name_collision, directive.span, "Named constraints collide within table (ASCII case-insensitive)");
+                        }
+                    };
+                    try uniques.append(self.allocator, .{ .name = constraint_name });
+                }
                 columns[j] = .{
                     .dsl_name = try self.allocator.dupe(u8, field.name.text),
                     .sql_name = column_name,
@@ -191,6 +215,7 @@ const Context = struct {
                     .primary_key = if (field_opts.reuse != null) .allow_reuse else if (field.primary_key) .standard else .none,
                     .default = value,
                     .documentation = try self.documentation(field.documentation),
+                    .unique_constraints = try uniques.toOwnedSlice(self.allocator),
                 };
             }
             tables[i] = .{ .dsl_name = try self.allocator.dupe(u8, table.name.text), .sql_name = sql_name, .columns = columns, .documentation = try self.documentation(table.documentation) };

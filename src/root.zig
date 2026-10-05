@@ -25,4 +25,5 @@ test {
     _ = @import("datetime_test.zig");
     _ = @import("enum_test.zig");
     _ = @import("check_test.zig");
+    _ = @import("unique_test.zig");
 }

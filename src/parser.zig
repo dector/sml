@@ -254,7 +254,46 @@ const Parser = struct {
         while (self.current.kind == .newline or self.current.kind == .comment) try self.advance();
     }
 
-    fn check(self: *Parser, start: usize) Error!parsed.Directive {
+    fn unique(self: *Parser, start: usize) Error!parsed.Directive {
+        var end = self.current.span.end;
+        try self.advance();
+        var options: std.ArrayList(parsed.Directive) = .empty;
+        if (self.current.kind == .l_brace) {
+            try self.advance();
+            if (self.current.kind != .r_brace) {
+                try self.lineEnd();
+                while (true) {
+                    try self.noDocs(try self.trivia());
+                    if (self.current.kind == .r_brace) break;
+                    if (self.current.kind == .eof) return self.fail(self.current.span, "Expected '}' to close unique options");
+                    if (self.current.kind != .hash) return self.fail(self.current.span, "Unique options require #name backtick");
+                    const hash = self.current;
+                    try self.advance();
+                    if (!self.word("name")) return self.fail(self.current.span, "Only #name is supported in unique options");
+                    try self.advance();
+                    const value = try self.take(.backtick, "#name requires a backtick literal");
+                    try options.append(self.allocator, .{ .kind = .{ .name = token(value) }, .span = .{ .start = hash.span.start, .end = value.span.end } });
+                    try self.lineEnd();
+                }
+            }
+            end = (try self.take(.r_brace, "Expected '}' to close unique options")).span.end;
+        }
+        return .{ .kind = .{ .native_unique = .{ .options = try options.toOwnedSlice(self.allocator) } }, .span = .{ .start = start, .end = end } };
+    }
+
+    fn check(self: *Parser, start: usize, field_scope: bool) Error!parsed.Directive {
+        if (self.word("unique")) {
+            var lookahead = self.lexer;
+            const next = lookahead.next();
+            if (next == .token) switch (next.token.kind) {
+                .l_paren => return self.fail(self.current.span, "unique(...) and nulls: equal are unsupported; deferred"),
+                .newline, .eof, .comment, .l_brace => {
+                    if (!field_scope) return self.fail(self.current.span, "Table composite uniqueness is unsupported; deferred");
+                    return self.unique(start);
+                },
+                else => {},
+            };
+        }
         var p: expression_parser.Parser = .{ .lexer = &self.lexer, .allocator = self.allocator, .current = self.current };
         const expression = p.parseExpression() catch |err| {
             self.current = p.current;
@@ -276,13 +315,13 @@ const Parser = struct {
                 if (self.current.kind != .question) return self.fail(marker.span, "Field checks (?) require field scope; use ?? expr in a table body");
                 try self.advance();
             }
-            return self.check(marker.span.start);
+            return self.check(marker.span.start, field_scope);
         }
         const hash = try self.take(.hash, "Expected supported field directive or ? expression");
         if (self.word("check")) {
             try self.advance();
             if (self.current.kind == .l_brace) return self.fail(self.current.span, "Named check bodies are not supported yet; use #check expr");
-            return self.check(hash.span.start);
+            return self.check(hash.span.start, field_scope);
         }
         if (self.word("name")) {
             try self.advance();

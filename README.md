@@ -48,8 +48,15 @@ overrides, and can target fields declared later; `_` is invalid in table scope.
 Single `?` is field-only; `??` is table-only. Table checks emit after columns and
 any composite primary key, in check source order. Empty tables (including
 checks-only tables) remain non-executable SQL skeletons.
-Docs cannot target checks. Named check bodies, constraint names, unique
-constraints, and indexes are not supported yet.
+Docs cannot target checks or unique constraints. Single-field `? unique` and
+`#check unique` emit SQLite column `UNIQUE` constraints, after defaults/checks.
+Optional same-line `{}` or multiline braces accept only `#name` backtick SQL
+names (including hash-delimited backticks). Names are exact, safely quoted,
+and unique ASCII-case-insensitively within each table, not global index names.
+Duplicate field uniqueness declarations and duplicate options are diagnosed.
+Plain uniqueness allows multiple NULLs. `unique(nulls: equal)` is explicitly
+deferred, as are table composite uniqueness, named checks, and indexes.
+Ordinary expressions such as `? unique == 'x'` still parse `unique` as an identifier.
 Unsupported later-v1 syntax returns a diagnostic.
 
 `expression_parser.parse(allocator, source)` separately parses one literal,

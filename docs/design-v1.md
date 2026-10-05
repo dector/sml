@@ -858,7 +858,15 @@ email str =
 ```
 
 `#name` in this options scope names the constraint, not the field/table. `as` naming
-is deferred. Native `unique` emits a uniqueness constraint/index, not a SQL `CHECK`.
+is deferred. Slice14 supports field uniqueness only, emitting a column
+`[CONSTRAINT quoted_name] UNIQUE` after defaults and checks, not a SQL `CHECK`.
+Options use same-line braces (including empty `{}`), never `=`. Only `#name`
+is accepted; duplicate names and duplicate field uniqueness are errors.
+Names must be nonempty with no NUL, are safely quoted verbatim, and must be
+ASCII-case-insensitively distinct within the table. These labels are not index
+object names. Documentation cannot target individual constraints.
+`unique` is contextual: `? unique == 'x'` remains an ordinary identifier
+expression subject to normal own-field-only semantic rules.
 
 ## 11. Uniqueness
 
@@ -869,7 +877,7 @@ email str =
   ? unique
 ```
 
-### Composite uniqueness
+### Composite uniqueness (deferred beyond Slice14)
 
 ```text
 Reader {
@@ -892,7 +900,8 @@ email str? =
   ? unique
 ```
 
-To allow only one null:
+The following nulls-equal syntax is deferred and explicitly diagnosed, not
+silently treated as plain uniqueness. Future proposed syntax to allow one null:
 
 ```text
 email str? =
@@ -911,7 +920,8 @@ CREATE UNIQUE INDEX "reader_email_one_null"
 ```
 
 The second index gives every null row the same indexed value, prohibiting a second
-one. This is a compiler-generated enforcement mechanism, not a runtime check.
+one. This is a potential future compiler-generated enforcement mechanism,
+not a runtime check; Slice14 does not generate these indexes.
 
 **Open detail:** nulls-equal behavior and syntax for composite uniqueness were not
 settled. Custom names for a rule that expands into several physical SQL objects

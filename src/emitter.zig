@@ -7,7 +7,7 @@ const writeBlob = sql_writer.writeBlob;
 const resolved = @import("model/resolved.zig");
 const expression_emitter = @import("expression_emitter.zig");
 
-pub const Error = expression_emitter.Error || error{ NullablePrimaryKey, InvalidPrimaryKey, InvalidIdReuse, InvalidDefault, InvalidEnum, DefaultOnAutoPrimaryKey, InvalidCheck };
+pub const Error = expression_emitter.Error || error{ NullablePrimaryKey, InvalidPrimaryKey, InvalidIdReuse, InvalidDefault, InvalidEnum, DefaultOnAutoPrimaryKey, InvalidCheck, InvalidUnique };
 
 /// Emit tables and columns in schema order, then ordered table CHECK items.
 /// Zero-column tables (even checks-only tables) remain non-executable skeletons.
@@ -18,14 +18,26 @@ pub const Error = expression_emitter.Error || error{ NullablePrimaryKey, Invalid
 /// Writer failures may leave partial output. The caller owns and flushes the writer.
 pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
     for (schema.tables) |table| {
-        if (std.mem.indexOfScalar(u8, table.sql_name, 0) != null) return error.InvalidIdentifier;
+        if (table.sql_name.len == 0 or std.mem.indexOfScalar(u8, table.sql_name, 0) != null) return error.InvalidIdentifier;
         const key_count = primaryKeyCount(table);
         for (table.checks) |check| {
             try expression_emitter.preflight(check);
             if (@import("expression_resolver.zig").validateCheckResult(&check) != null) return error.InvalidCheck;
         }
-        for (table.columns) |column| {
-            if (std.mem.indexOfScalar(u8, column.sql_name, 0) != null) return error.InvalidIdentifier;
+        for (table.columns, 0..) |column, column_index| {
+            if (column.unique_constraints.len > 1) return error.InvalidUnique;
+            for (column.unique_constraints) |unique| {
+                if (unique.nulls != .distinct) return error.InvalidUnique;
+                if (unique.name) |name| {
+                    if (name.len == 0 or std.mem.indexOfScalar(u8, name, 0) != null) return error.InvalidIdentifier;
+                    for (table.columns[0..column_index]) |previous| {
+                        for (previous.unique_constraints) |prior| {
+                            if (prior.name) |p| if (std.ascii.eqlIgnoreCase(name, p)) return error.InvalidUnique;
+                        }
+                    }
+                }
+            }
+            if (column.sql_name.len == 0 or std.mem.indexOfScalar(u8, column.sql_name, 0) != null) return error.InvalidIdentifier;
             if (column.primary_key != .none and column.nullable) return error.NullablePrimaryKey;
             if (column.primary_key != .none and column.type == .boolean) return error.InvalidPrimaryKey;
             if (column.primary_key == .allow_reuse and
@@ -107,6 +119,13 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
                 try writer.writeAll(" CHECK (");
                 try expression_emitter.emit(check, writer);
                 try writer.writeByte(')');
+            }
+            for (column.unique_constraints) |unique| {
+                if (unique.name) |name| {
+                    try writer.writeAll(" CONSTRAINT ");
+                    try writeIdentifier(writer, name);
+                }
+                try writer.writeAll(" UNIQUE");
             }
             if (index + 1 < table.columns.len or key_count > 1 or table.checks.len > 0) try writer.writeByte(',');
             try writer.writeByte('\n');

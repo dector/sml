@@ -2,8 +2,15 @@
 
 Status: the first supported parser milestone (stages 1–4) is implemented and
 covered by tokenizer, parser, allocation-failure, and source-to-SQL tests.
-Stage 5 is partially implemented through Slice13 table checks;
-named check bodies, constraint names, uniqueness, and indexes remain future work. Unsupported
+Stage 5 is partially implemented through Slice14 single-field native uniqueness.
+`? unique` / `#check unique` preserve a native_unique payload with empty field
+references and ordered, spanned options. Same-line brace options support exact
+backtick #name only; duplicates are preserved for resolver diagnostics.
+The resolved column carries unique_constraints; SQLite emission uses safely
+quoted optional CONSTRAINT names followed by UNIQUE after defaults/checks.
+Table-local constraint names compare ASCII-case-insensitively, independently
+of index object names. Plain NULLs remain distinct. Composite uniqueness,
+`unique(nulls: equal)`, named checks, and indexes remain deferred. Unsupported
 syntax is diagnosed rather than ignored.
 See [the language design](design-v1.md) for broader v1 scope.
 
@@ -313,7 +320,7 @@ Extend syntax models, parser, resolver, emitter, and tests together:
 
 1. Additional defaults and date/JSON types. Inline enums are complete;
    reusable types remain deferred indefinitely.
-2. Named check bodies, constraint names, uniqueness, and indexes (expression precedence, field checks, and table checks are implemented).
+2. Composite uniqueness, nulls-equal, named check bodies, and indexes (expression precedence, field checks, and table checks are implemented).
 3. Stored FKs and virtual relationships.
 4. Named/unnamed connections, roles, generated keys, and destination hints.
 5. Remaining directives and multiline literals after their rules are finalized.
