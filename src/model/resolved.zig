@@ -18,11 +18,12 @@ pub const Table = struct {
     columns: []const Column = &.{},
 };
 
-/// Logical column types. Boolean uses INTEGER storage; datetime uses TEXT.
+/// Logical column types. Boolean uses INTEGER; datetime and enumeration use TEXT.
 pub const StorageType = enum {
     integer,
     boolean,
     datetime,
+    enumeration,
     real,
     text,
     blob,
@@ -38,6 +39,7 @@ pub const PrimaryKey = enum {
 
 /// A resolved literal or trusted SQLite default expression.
 /// No default is represented by a null optional, not `null_value`.
+/// Enum literals use `text`; direct `raw_sql` remains a trusted escape hatch.
 pub const Default = union(enum) {
     integer: i64,
     boolean: bool,
@@ -56,6 +58,8 @@ pub const Column = struct {
     documentation: ?Documentation = null,
     sql_name: []const u8,
     type: StorageType,
+    /// Nonempty, exact-byte unique decoded values for enumeration only.
+    enum_values: []const []const u8 = &.{},
     nullable: bool = false,
     primary_key: PrimaryKey = .none,
     default: ?Default = null,

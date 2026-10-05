@@ -19,6 +19,7 @@ pub const Kind = enum {
     question,
     equal,
     hash,
+    comma,
     newline,
     comment,
     doc,
@@ -34,6 +35,8 @@ pub const Tokenizer = struct {
     indent: usize = 0,
     line_start: bool = true,
     line_has_token: bool = false,
+    /// Contextual enum literals only; declaration identifiers stay narrow.
+    enum_value_mode: bool = false,
 
     pub fn init(source: []const u8) Tokenizer {
         return .{ .source = source };
@@ -69,9 +72,10 @@ pub const Tokenizer = struct {
         self.line_has_token = true;
         if (isIdentifierStart(c)) {
             self.pos += 1;
-            while (self.pos < self.source.len and isIdentifierContinue(self.source[self.pos])) self.pos += 1;
+            while (self.pos < self.source.len and (isIdentifierContinue(self.source[self.pos]) or
+                (self.enum_value_mode and self.source[self.pos] == '-'))) self.pos += 1;
             const text = self.source[start..self.pos];
-            return self.token(if (std.mem.eql(u8, text, "true") or std.mem.eql(u8, text, "false")) .boolean else .identifier, start);
+            return self.token(if (!self.enum_value_mode and (std.mem.eql(u8, text, "true") or std.mem.eql(u8, text, "false"))) .boolean else .identifier, start);
         }
         if (c == '-' and self.pos + 1 < self.source.len and self.source[self.pos + 1] == '-') {
             self.pos += 2;
@@ -105,6 +109,7 @@ pub const Tokenizer = struct {
             '?' => self.token(.question, start),
             '=' => self.token(.equal, start),
             '#' => self.token(.hash, start),
+            ',' => self.token(.comma, start),
             '"' => self.fail(start, "double-quoted strings are not supported; use single quotes"),
             '.', '+' => self.fail(start, "invalid number syntax; use decimal digits with an optional leading minus"),
             '|' => self.fail(start, "pipe bodies are not supported; use '=' or braces"),

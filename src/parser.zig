@@ -167,12 +167,18 @@ const Parser = struct {
             try self.advance();
         }
         const type_span: parsed.Span = .{ .start = type_name.span.start, .end = end };
+        const is_enum = std.mem.eql(u8, type_name.text, "enum");
         var default: ?parsed.Default = null;
         if (self.current.kind == .l_paren) {
+            self.lexer.enum_value_mode = is_enum;
             try self.advance();
             try self.expressionTrivia();
             const value = self.current;
-            default = switch (value.kind) {
+            default = if (is_enum) switch (value.kind) {
+                .identifier => if (self.word("null")) .{ .null_value = token(value) } else .{ .enum_text = token(value) },
+                .backtick => .{ .enum_text = token(value) },
+                else => return self.fail(value.span, "Enum defaults require a bare word, backtick text, or nullable null"),
+            } else switch (value.kind) {
                 .integer => .{ .integer = token(value) },
                 .boolean => .{ .boolean = token(value) },
                 .real => .{ .real = token(value) },
@@ -182,6 +188,7 @@ const Parser = struct {
                 .identifier => if (self.word("null")) .{ .null_value = token(value) } else return self.fail(value.span, "Unsupported default; expected a literal or raw SQL"),
                 else => return self.fail(value.span, "Expected default literal"),
             };
+            self.lexer.enum_value_mode = false;
             try self.advance();
             try self.expressionTrivia();
             end = (try self.take(.r_paren, "Expected ')' after default literal; expressions are unsupported")).span.end;
@@ -252,6 +259,24 @@ const Parser = struct {
             try self.advance();
             const value = try self.take(.backtick, "#name requires a backtick literal");
             return .{ .kind = .{ .name = token(value) }, .span = .{ .start = hash.span.start, .end = value.span.end } };
+        }
+        if (self.word("of")) {
+            if (!field_scope) return self.fail(self.current.span, "#of is field-only");
+            self.lexer.enum_value_mode = true;
+            try self.advance();
+            var values: std.ArrayList(parsed.Token) = .empty;
+            while (true) {
+                const value = self.current;
+                if (value.kind != .backtick and (value.kind != .identifier or self.word("null")))
+                    return self.fail(value.span, "#of requires enum words or backtick text; quote null");
+                try values.append(self.allocator, token(value));
+                try self.advance();
+                if (self.current.kind != .comma) break;
+                try self.advance();
+            }
+            self.lexer.enum_value_mode = false;
+            const end = values.items[values.items.len - 1].span.end;
+            return .{ .kind = .{ .of = try values.toOwnedSlice(self.allocator) }, .span = .{ .start = hash.span.start, .end = end } };
         }
         if (self.word("allow")) {
             if (!field_scope) return self.fail(self.current.span, "#allow reuse is supported only in field bodies");

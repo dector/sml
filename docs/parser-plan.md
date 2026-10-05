@@ -40,7 +40,32 @@ minutes/seconds 00–59. Offsets, leap seconds, and fractional seconds (even `.0
 are rejected; fractional precision is later work. Nullable NULL passes. Datetime
 keys are not auto-generated integers. Raw SQL defaults face the same runtime
 checks. See `src/datetime_test.zig` and `src/testdata/datetime_runtime_test.py`.
-Other generators, date/JSON, enums, user checks, indexes, FKs, relationships, and
+Inline enums are implemented with TEXT storage and `CHECK (column IN (...))`.
+Field-level enum-only `#of` lines accumulate comma-separated members in either
+body form. Lists cannot be empty, omit a member, have trailing commas, or span
+lines. Duplicate decoded bytes are errors; no case folding or Unicode
+normalization applies. Empty backtick text is a valid member.
+
+Bare enum words use `[A-Za-z_][A-Za-z0-9_-]*`, scanned maximally in an explicit
+contextual tokenizer mode. `a--b` is text; whitespace before `--` starts an
+ordinary comment after a bare member. Declaration identifiers stay narrow, so
+`str--comment` still means type plus comment. Backticks are scanned atomically.
+Enum defaults use the same bare/backtick text syntax and must belong to the set.
+Bare `null` is a nullable default only; backtick `null` is text. Contextual
+`true`, `false`, and `_` are valid enum words. Strings, numbers, and `::now` are
+invalid enum defaults. Enum keys have TEXT semantics, no automatic IDs, and
+cannot use `#allow reuse`. Stored arrays remain unsupported.
+
+Parsed member/default tokens borrow source and retain spans. Resolution owns the
+decoded arrays and text. Resolver and emitter independently validate enum
+metadata and defaults at their API boundaries, before SQL output. The direct
+resolved `.raw_sql` default remains a trusted escape hatch; parser enum
+backticks are text, not SQL. NUL enum SQL uses quoted chunks plus `char(0)` to
+preserve text in UTF-8/UTF-16; the older NUL `str` blob-cast default has a known
+UTF-16 encoding bug (see design section 15). Tests: `src/enum_test.zig`, the
+`enum.pzl`/SQL fixture, and `src/testdata/enum_runtime_test.py`.
+
+Other generators, date/JSON, user checks, indexes, FKs, relationships, and
 connections come in later slices. Reusable types are deferred indefinitely.
 Numeric exponent notation and multiline literals are deferred.
 
@@ -158,7 +183,7 @@ compatibility with the field type belong to resolution.
   ```
 
 - Hash-delimited forms are supported wherever backticks are used: exact names,
-  raw SQL, and later enum text. Context determines meaning.
+  raw SQL, and enum text. Context determines meaning.
 - Only an exact matching closing hash count terminates a hash-delimited literal;
   other delimiter-like sequences remain content. EOF without a matching closer
   is an error.
@@ -251,7 +276,8 @@ implementation changes.
 
 Extend syntax models, parser, resolver, emitter, and tests together:
 
-1. Reusable types, enums, and additional defaults.
+1. Additional defaults and date/JSON types. Inline enums are complete;
+   reusable types remain deferred indefinitely.
 2. Expression precedence, checks, uniqueness, and indexes.
 3. Stored FKs and virtual relationships.
 4. Named/unnamed connections, roles, generated keys, and destination hints.
@@ -266,5 +292,5 @@ when implementing the affected features rather than inventing silent rules:
 
 - Output placement for docs on reusable types or virtual relationships.
 - Remaining multiline raw-string rules (tabs, blank marker lines, line endings).
-- Enum bare-token grammar and enum literals in expressions.
+- Enum literals in future DSL expressions (inline member/default grammar is settled).
 - Remaining semantic and generated-SQL decisions listed in the v1 design.

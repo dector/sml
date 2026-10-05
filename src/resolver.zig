@@ -20,6 +20,7 @@ pub const Category = enum {
     default_on_auto_primary_key,
     invalid_default,
     invalid_literal,
+    invalid_enum,
     unsupported_multiline,
 };
 
@@ -75,6 +76,9 @@ const Context = struct {
             .name => |token| {
                 if (result.name != null) return self.fail(.duplicate_directive, directive.span, "duplicate #name directive");
                 result.name = token;
+            },
+            .of => {
+                if (table) return self.fail(.invalid_directive_scope, directive.span, "#of is field-only");
             },
             .allow_reuse => {
                 if (result.reuse != null) return self.fail(.duplicate_directive, directive.span, "duplicate #allow reuse directive");
@@ -158,7 +162,22 @@ const Context = struct {
                     if (std.ascii.eqlIgnoreCase(previous.sql_name, column_name))
                         return self.fail(.sql_name_collision, if (field_opts.name) |n| n.span else field.name.span, "SQL column names collide (ASCII case-insensitive)");
                 }
-                const storage: resolved.StorageType = if (std.mem.eql(u8, field.type.name.text, "int")) .integer else if (std.mem.eql(u8, field.type.name.text, "real")) .real else if (std.mem.eql(u8, field.type.name.text, "str")) .text else if (std.mem.eql(u8, field.type.name.text, "blob")) .blob else if (std.mem.eql(u8, field.type.name.text, "bool")) .boolean else if (std.mem.eql(u8, field.type.name.text, "datetime")) .datetime else return self.fail(.unknown_type, field.type.name.span, "unknown type; supported builtins are int, real, str, blob, bool, datetime");
+                const storage: resolved.StorageType = if (std.mem.eql(u8, field.type.name.text, "int")) .integer else if (std.mem.eql(u8, field.type.name.text, "real")) .real else if (std.mem.eql(u8, field.type.name.text, "str")) .text else if (std.mem.eql(u8, field.type.name.text, "blob")) .blob else if (std.mem.eql(u8, field.type.name.text, "bool")) .boolean else if (std.mem.eql(u8, field.type.name.text, "datetime")) .datetime else if (std.mem.eql(u8, field.type.name.text, "enum")) .enumeration else return self.fail(.unknown_type, field.type.name.span, "unknown type; supported builtins are int, real, str, blob, bool, datetime, enum");
+                var enum_values: std.ArrayList([]const u8) = .empty;
+                for (field.directives) |directive| {
+                    if (directive.kind == .of) {
+                        if (storage != .enumeration) return self.fail(.invalid_directive_scope, directive.span, "#of requires an enum field");
+                        if (directive.kind.of.len == 0) return self.fail(.invalid_enum, directive.span, "#of cannot be empty");
+                        for (directive.kind.of) |enum_token| {
+                            const text = try self.enumText(enum_token);
+                            if (@import("enumeration.zig").contains(enum_values.items, text))
+                                return self.fail(.invalid_enum, enum_token.span, "duplicate decoded enum value");
+                            try enum_values.append(self.allocator, text);
+                        }
+                    }
+                }
+                if (storage == .enumeration and enum_values.items.len == 0)
+                    return self.fail(.invalid_enum, field.type.span, "enum requires a nonempty #of set");
                 if (field.primary_key and field.type.nullable)
                     return self.fail(.nullable_primary_key, field.type.span, "primary-key fields cannot be nullable");
                 if (field.primary_key and storage == .boolean)
@@ -173,11 +192,15 @@ const Context = struct {
                     if (field.primary_key and storage == .integer and key_count == 1)
                         return self.fail(.default_on_auto_primary_key, token.span, "auto-generated integer primary keys cannot have defaults");
                     value = try self.defaultValue(default, storage, field.type.nullable);
+                    if (storage == .enumeration and value.? == .text and
+                        !@import("enumeration.zig").contains(enum_values.items, value.?.text))
+                        return self.fail(.invalid_default, token.span, "enum default is not in its allowed set");
                 }
                 columns[j] = .{
                     .dsl_name = try self.allocator.dupe(u8, field.name.text),
                     .sql_name = column_name,
                     .type = storage,
+                    .enum_values = try enum_values.toOwnedSlice(self.allocator),
                     .nullable = field.type.nullable,
                     .primary_key = if (field_opts.reuse != null) .allow_reuse else if (field.primary_key) .standard else .none,
                     .default = value,
@@ -194,6 +217,19 @@ const Context = struct {
         return .{ .text = try self.allocator.dupe(u8, value.text), .span = value.span };
     }
 
+    fn enumText(self: *Context, token: parsed.Token) Error![]const u8 {
+        const text = token.text;
+        if (text.len > 0 and (text[0] == '`' or text[0] == '#')) {
+            const decoded = try self.backticks(token);
+            if (!std.unicode.utf8ValidateSlice(decoded))
+                return self.fail(.invalid_literal, token.span, "enum text must be valid UTF-8");
+            return self.allocator.dupe(u8, decoded);
+        }
+        if (!@import("enumeration.zig").bare(text))
+            return self.fail(.invalid_literal, token.span, "invalid bare enum word; use backticks for arbitrary text");
+        return self.allocator.dupe(u8, text);
+    }
+
     fn defaultValue(self: *Context, value: parsed.Default, storage: resolved.StorageType, nullable: bool) Error!resolved.Default {
         const token = defaultToken(value);
         const compatible = switch (value) {
@@ -203,10 +239,12 @@ const Context = struct {
             .text => storage == .text or storage == .datetime,
             .generator => storage == .datetime,
             .null_value => nullable,
-            .raw_sql => true,
+            .enum_text => storage == .enumeration,
+            .raw_sql => storage != .enumeration,
         };
         if (!compatible) return self.fail(.invalid_default, token.span, "default does not match column type or nullability");
         return switch (value) {
+            .enum_text => .{ .text = try self.enumText(token) },
             .boolean => blk: {
                 if (std.mem.eql(u8, token.text, "true")) break :blk .{ .boolean = true };
                 if (std.mem.eql(u8, token.text, "false")) break :blk .{ .boolean = false };

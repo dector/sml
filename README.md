@@ -20,7 +20,12 @@ Supported: braced tables, stored fields, `!` keys, nullable `?`, literal default
 `=` with exactly two extra spaces. The string type is `str`, not `text` or
 `string`. Boolean defaults use `true`/`false`; `bool` cannot be a primary key.
 `datetime` accepts whole-second UTC `YYYY-MM-DDTHH:MM:SSZ` and insertion-time
-`::now`. Fractional seconds and reusable types are deferred.
+`::now`. Inline `enum` fields use one or more field-level `#of` comma lists,
+TEXT storage, and allowed-value checks. Bare enum words match
+`[A-Za-z_][A-Za-z0-9_-]*`; backticks mean enum text, including in defaults.
+Use whitespace before a `--` comment after a bare enum value (`a--b` is text).
+Duplicate decoded values and empty sets are rejected; nullable enums may default
+to `null`. Fractional seconds are deferred; reusable types are deferred indefinitely.
 Unsupported later-v1 syntax returns a diagnostic.
 
 ## Development
@@ -34,5 +39,6 @@ zig fmt --check build.zig build.zig.zon src
 python3 src/testdata/boolean_runtime_test.py
 python3 src/testdata/datetime_runtime_test.py
 python3 src/testdata/encoding_runtime_test.py
+python3 src/testdata/enum_runtime_test.py
 ```
 

@@ -18,7 +18,9 @@ these syntax decisions require implementation updates, not just resolver changes
 - `STRICT` tables by default.
 - SQL output, not an ORM or query generator.
 - Fresh-schema creation, not migrations.
-- Stored foreign keys, backrefs, generated connection tables, and reusable types.
+- Stored foreign keys, backrefs, and generated connection tables are planned.
+- Inline enums are implemented. Reusable types (including named enums) are
+  deferred indefinitely; their examples below are design sketches, not supported syntax.
 - Role-named and multi-endpoint connections are included toward the end of v1.
 - No custom SQLite runtime functions required by generated constraints.
 
@@ -291,8 +293,7 @@ becomes `http_server`, `URLValue` becomes `url_value`, and `tenantId` becomes
 
 **Open naming details:** generated index/trigger names and explicit naming of a
 primary-key constraint need final rules. Hash-delimited backticks support embedded
-backticks (see section 8); the current supported-subset resolver still rejects
-these and must be updated.
+backticks (see section 8) in the parser and resolver.
 
 ## 6. Built-in types and nullability
 
@@ -1292,12 +1293,39 @@ status enum(draft) =
   #of out-of-print, `in review`
 ```
 
-- Commas separate values.
-- Multiple `#of` lines accumulate allowed values.
-- Bare values support `_` and `-`; enum tokens are distinct from declaration
-  identifiers. Their full lexical grammar remains open.
-- Values containing spaces use backticks.
-- Inside `#of`, backticks mean enum text, not SQL.
+Inline enums are implemented end-to-end, with both `=` and braced field bodies.
+
+- `#of` is field-only and enum-only. Commas separate members on each line.
+  Missing members and trailing commas are errors; lists do not continue on the
+  next line. Multiple `#of` lines accumulate values in source order.
+- Bare values match `[A-Za-z_][A-Za-z0-9_-]*` with maximal matching. Declaration
+  identifiers remain `[A-Za-z_][A-Za-z0-9_]*`.
+- In enum-value contexts, `a--b` is one value, not a comment. Put whitespace
+  before `--` to start a comment after a bare value: `#of a -- comment`.
+  Existing adjacent comments such as `field str--comment` are unchanged.
+- `true`, `false`, and `_` are valid bare enum text contextually. Bare `null` is
+  reserved for a nullable default; use `` `null` `` for the actual text.
+- Backticks (including hash-delimited backticks) represent arbitrary valid UTF-8
+  text, never raw SQL in `#of` or an enum default. NUL is allowed; malformed UTF-8
+  is rejected by resolution and direct emitter validation. Literal scanning
+  remains atomic.
+- Empty backtick text is a valid member. Empty allowed sets are errors.
+- Duplicate decoded values are errors, including duplicates across `#of` lines
+  or different delimiter forms. Comparison is exact bytes, with no case folding
+  or Unicode normalization.
+- Enum defaults must be declared members, or `null` on a nullable enum. Ordinary
+  strings, numbers, and `::now` are invalid enum defaults.
+- SQL uses `TEXT` with `CHECK (column IN (...))`. Values are safely quoted;
+  apostrophes are doubled. NUL text uses quoted pieces joined with `char(0)` so
+  Unicode and NUL round-trip in UTF-8 and UTF-16 databases. Nullable SQL NULL
+  passes the check; non-null fields have a separate `NOT NULL`.
+- Enum primary keys use ordinary TEXT semantics, including composite keys; they
+  do not generate IDs. Nullable keys are invalid. `#allow reuse` remains single
+  integer-primary-key-only. Stored arrays remain unsupported.
+- Resolver validation also covers manually constructed parsed enums. Emitter
+  validation covers direct resolved metadata and literal default membership
+  before any output. Direct resolved `.raw_sql` defaults remain a trusted
+  escape hatch, like other columns, and face the runtime CHECK on insertion.
 
 Enum defaults are bare enum values:
 
@@ -1316,7 +1344,9 @@ status enum(`in review`) =
 Do not require single quotes around enum defaults. Ordinary `str` defaults still
 use string literals.
 
-### Reusable enums
+### Reusable enums (deferred indefinitely)
+
+The following is a design sketch only. Reusable type declarations are unsupported.
 
 ```text
 => Status enum(draft) =
@@ -1353,11 +1383,15 @@ allowed only for a nullable enum.
 Fields using a named enum cannot add values with `#of`. They may narrow the type
 with additional checks, but cannot expand it.
 
-**Open details:** duplicate enum values, empty enums, and the full lexical grammar
-for bare enum tokens need explicit validation rules. Rejecting duplicate values
-and empty allowed-value sets is recommended.
+**Known existing emitter bug (not enum behavior):** NUL-containing `str` literal
+SQL defaults currently use `CAST(X'...' AS TEXT)` with UTF-8 bytes. SQLite decodes
+those bytes using the database encoding, corrupting them in UTF-16 databases.
+Enums deliberately use encoding-independent `char(0)` concatenation instead.
+The enum runtime test reproduces this pre-existing string-default issue.
 
-## 16. Reusable constrained types
+## 16. Reusable constrained types (deferred indefinitely)
+
+This section is a design sketch; none of this syntax is currently supported.
 
 ```text
 => Positive int =

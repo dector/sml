@@ -2,12 +2,13 @@
 const std = @import("std");
 const resolved = @import("model/resolved.zig");
 
-pub const Error = std.Io.Writer.Error || error{ InvalidIdentifier, NullablePrimaryKey, InvalidPrimaryKey, InvalidIdReuse, InvalidDefault, DefaultOnAutoPrimaryKey };
+pub const Error = std.Io.Writer.Error || error{ InvalidIdentifier, NullablePrimaryKey, InvalidPrimaryKey, InvalidIdReuse, InvalidDefault, InvalidEnum, DefaultOnAutoPrimaryKey };
 
 /// Emit tables and columns in schema order. Zero-column tables remain skeletons,
 /// not executable SQLite SQL. Relationships are virtual and produce no SQL.
 /// NUL-containing SQL names, invalid primary keys, ID reuse options, and literal
-/// defaults are rejected before writing. Raw SQL is trusted and not syntax-validated.
+/// defaults and enum metadata are rejected before writing. Raw SQL is trusted
+/// and not syntax-validated, including direct resolved enum raw-SQL defaults.
 /// Writer failures may leave partial output. The caller owns and flushes the writer.
 pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
     for (schema.tables) |table| {
@@ -22,6 +23,9 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
             {
                 return error.InvalidIdReuse;
             }
+            if (column.type == .enumeration) {
+                if (!@import("enumeration.zig").valid(column.enum_values)) return error.InvalidEnum;
+            } else if (column.enum_values.len != 0) return error.InvalidEnum;
             if (column.default) |value| {
                 if (column.primary_key != .none and key_count == 1 and column.type == .integer)
                     return error.DefaultOnAutoPrimaryKey;
@@ -47,7 +51,7 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
             try writer.writeAll(switch (column.type) {
                 .integer, .boolean => "INTEGER",
                 .real => "REAL",
-                .text, .datetime => "TEXT",
+                .text, .datetime, .enumeration => "TEXT",
                 .blob => "BLOB",
             });
             if (column.primary_key != .none and key_count == 1 and column.type == .integer) {
@@ -59,7 +63,20 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
             }
             if (column.default) |value| {
                 try writer.writeAll(" DEFAULT ");
-                try writeDefault(writer, value);
+                if (column.type == .enumeration and value == .text)
+                    try writeEnumText(writer, value.text)
+                else
+                    try writeDefault(writer, value);
+            }
+            if (column.type == .enumeration) {
+                try writer.writeAll(" CHECK (");
+                try writeIdentifier(writer, column.sql_name);
+                try writer.writeAll(" IN (");
+                for (column.enum_values, 0..) |text, i| {
+                    if (i != 0) try writer.writeAll(", ");
+                    try writeEnumText(writer, text);
+                }
+                try writer.writeAll("))");
             }
             if (column.type == .boolean) {
                 // IN yields NULL for SQL NULL, allowing nullable Boolean fields.
@@ -119,7 +136,7 @@ fn validateDefault(column: resolved.Column, value: resolved.Default) Error!void 
         .integer => column.type == .integer or column.type == .real,
         .boolean => column.type == .boolean,
         .real => |number| column.type == .real and std.math.isFinite(number),
-        .text => column.type == .text,
+        .text => |text| column.type == .text or (column.type == .enumeration and @import("enumeration.zig").contains(column.enum_values, text)),
         .datetime => |text| column.type == .datetime and @import("datetime.zig").valid(text),
         .now => column.type == .datetime,
         .blob => column.type == .blob,
@@ -158,6 +175,26 @@ fn writeDefault(writer: *std.Io.Writer, value: resolved.Default) std.Io.Writer.E
             try writer.writeByte(')');
         },
     }
+}
+
+/// char(0) rather than CAST(UTF-8 blob AS TEXT): SQLite blob casts use the
+/// database encoding and corrupt UTF-8 bytes in UTF-16 databases.
+fn writeEnumText(writer: *std.Io.Writer, text: []const u8) std.Io.Writer.Error!void {
+    const has_nul = std.mem.indexOfScalar(u8, text, 0) != null;
+    if (has_nul) try writer.writeByte('(');
+    var pieces = std.mem.splitScalar(u8, text, 0);
+    var first = true;
+    while (pieces.next()) |piece| {
+        if (!first) try writer.writeAll(" || char(0) || ");
+        first = false;
+        try writer.writeByte('\'');
+        for (piece) |byte| {
+            try writer.writeByte(byte);
+            if (byte == '\'') try writer.writeByte('\'');
+        }
+        try writer.writeByte('\'');
+    }
+    if (has_nul) try writer.writeByte(')');
 }
 
 fn writeBlob(writer: *std.Io.Writer, bytes: []const u8) std.Io.Writer.Error!void {
@@ -422,7 +459,7 @@ test "non-integer primary keys are required and do not generate IDs" {
             .text => @embedFile("testdata/emitter/text_primary_key.expect.sql"),
             .real => @embedFile("testdata/emitter/real_primary_key.expect.sql"),
             .blob => @embedFile("testdata/emitter/blob_primary_key.expect.sql"),
-            .integer, .boolean, .datetime => unreachable,
+            .integer, .boolean, .datetime, .enumeration => unreachable,
         };
         try std.testing.expectEqualStrings(expected, output.written());
     }

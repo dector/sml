@@ -78,7 +78,7 @@ pub const TypeRef = struct {
 
 /// Defaults retain their original spelling, not resolved runtime values.
 /// `text` includes ordinary or raw-string delimiters. `raw_sql` includes
-/// backticks. Absence of a default is distinct from an explicit `null_value`.
+/// backticks; enum backticks are instead contextual `enum_text`. Absence of a default is distinct from an explicit `null_value`.
 /// There is no dedicated blob-literal syntax yet; raw SQL is its escape hatch.
 pub const Default = union(enum) {
     integer: Token,
@@ -87,17 +87,22 @@ pub const Default = union(enum) {
     text: Token,
     null_value: Token,
     raw_sql: Token,
+    /// Bare word or backtick text in an enum default, never SQL.
+    enum_text: Token,
     /// Contextual generator spelling, including the `::` prefix.
     generator: Token,
 };
 
 /// Preserve duplicates and source order for later scope/conflict diagnostics.
+/// `of` members borrow source tokens, with bare words or backtick delimiters.
 /// A `name` argument includes its backtick delimiters; it is not yet decoded.
 /// The span covers the whole directive, including its argument.
 pub const Directive = struct {
     kind: union(enum) {
         name: Token,
         allow_reuse,
+        /// Contextual enum values; keep spelling and source order.
+        of: []const Token,
     },
     span: Span,
 };
