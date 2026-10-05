@@ -47,17 +47,4 @@ for encoding in ("UTF-8", "UTF-16le", "UTF-16be"):
         rejected(db, "INSERT INTO pair VALUES ('A', NULL)")
         rejected(db, "INSERT INTO pair VALUES ('C', 'x')")
 
-# Existing str-default emitter behavior is deliberately not copied for enum text.
-# CAST(X'...' AS TEXT) interprets bytes in the DB encoding, not always as UTF-8.
-for encoding in ("UTF-16le", "UTF-16be"):
-    with sqlite3.connect(":memory:") as db:
-        db.execute(f"PRAGMA encoding = '{encoding}'")
-        db.execute("CREATE TABLE existing (v TEXT DEFAULT (CAST(X'6100E99BAA' AS TEXT))) STRICT")
-        db.execute("INSERT INTO existing DEFAULT VALUES")
-        try:
-            value = db.execute("SELECT v FROM existing").fetchone()[0]
-        except sqlite3.OperationalError:
-            value = None  # Invalid Unicode is also possible for arbitrary bytes.
-        assert value != "a\x00雪", "Revisit the documented existing str-default bug if fixed"
-
 print("SQLite enum runtime checks passed (UTF-8, UTF-16le, UTF-16be)")

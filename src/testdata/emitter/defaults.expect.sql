@@ -10,7 +10,7 @@ CREATE TABLE "settings" (
   "empty_blob" BLOB NOT NULL DEFAULT X'',
   "optional" TEXT DEFAULT NULL,
   "created_at" TEXT NOT NULL DEFAULT (strftime('%Y', 'now')),
-  "nul_text" TEXT NOT NULL DEFAULT (CAST(X'610062' AS TEXT)),
+  "nul_text" TEXT NOT NULL DEFAULT ('a' || char(0) || 'b'),
   "no_default" INTEGER NOT NULL
 ) STRICT;
 

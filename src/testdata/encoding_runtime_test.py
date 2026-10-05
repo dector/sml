@@ -16,6 +16,12 @@ def rejected(connection, sql, parameters=()):
 for encoding in ("UTF-8", "UTF-16le", "UTF-16be"):
     with sqlite3.connect(":memory:") as db:
         db.execute(f"PRAGMA encoding = '{encoding}'")
+        db.executescript((FIXTURES.parent / "emitter/defaults.expect.sql").read_text())
+        db.execute("INSERT INTO settings(no_default) VALUES (1)")
+        assert db.execute("SELECT nul_text FROM settings").fetchone()[0] == "a\x00b"
+
+    with sqlite3.connect(":memory:") as db:
+        db.execute(f"PRAGMA encoding = '{encoding}'")
         db.executescript((FIXTURES / "boolean.expect.sql").read_text())
         db.execute("INSERT INTO flags DEFAULT VALUES")
         assert db.execute("SELECT enabled, disabled, optional, unknown FROM flags").fetchone() == (1, 0, None, None)

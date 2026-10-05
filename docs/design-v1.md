@@ -1383,11 +1383,9 @@ allowed only for a nullable enum.
 Fields using a named enum cannot add values with `#of`. They may narrow the type
 with additional checks, but cannot expand it.
 
-**Known existing emitter bug (not enum behavior):** NUL-containing `str` literal
-SQL defaults currently use `CAST(X'...' AS TEXT)` with UTF-8 bytes. SQLite decodes
-those bytes using the database encoding, corrupting them in UTF-16 databases.
-Enums deliberately use encoding-independent `char(0)` concatenation instead.
-The enum runtime test reproduces this pre-existing string-default issue.
+Enum values and ordinary text defaults share encoding-independent SQL quoting.
+NUL-containing text uses `char(0)` concatenation, preserving it in both UTF-8 and
+UTF-16 databases rather than casting encoding-dependent blob bytes to text.
 
 ## 16. Reusable constrained types (deferred indefinitely)
 

@@ -63,10 +63,7 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
             }
             if (column.default) |value| {
                 try writer.writeAll(" DEFAULT ");
-                if (column.type == .enumeration and value == .text)
-                    try writeEnumText(writer, value.text)
-                else
-                    try writeDefault(writer, value);
+                try writeDefault(writer, value);
             }
             if (column.type == .enumeration) {
                 try writer.writeAll(" CHECK (");
@@ -74,7 +71,7 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
                 try writer.writeAll(" IN (");
                 for (column.enum_values, 0..) |text, i| {
                     if (i != 0) try writer.writeAll(", ");
-                    try writeEnumText(writer, text);
+                    try writeText(writer, text);
                 }
                 try writer.writeAll("))");
             }
@@ -152,21 +149,7 @@ fn writeDefault(writer: *std.Io.Writer, value: resolved.Default) std.Io.Writer.E
         .boolean => |value_bool| try writer.writeAll(if (value_bool) "1" else "0"),
         .real => |number| try writer.print("{d}", .{number}),
         .now => try writer.writeAll("(strftime('%Y-%m-%dT%H:%M:%SZ','now'))"),
-        .text, .datetime => |text| {
-            // SQL source cannot contain NUL. Preserve such text through a blob cast.
-            if (std.mem.indexOfScalar(u8, text, 0) != null) {
-                try writer.writeAll("(CAST(");
-                try writeBlob(writer, text);
-                try writer.writeAll(" AS TEXT))");
-            } else {
-                try writer.writeByte('\'');
-                for (text) |byte| {
-                    try writer.writeByte(byte);
-                    if (byte == '\'') try writer.writeByte('\'');
-                }
-                try writer.writeByte('\'');
-            }
-        },
+        .text, .datetime => |text| try writeText(writer, text),
         .blob => |bytes| try writeBlob(writer, bytes),
         .null_value => try writer.writeAll("NULL"),
         .raw_sql => |sql| {
@@ -179,7 +162,7 @@ fn writeDefault(writer: *std.Io.Writer, value: resolved.Default) std.Io.Writer.E
 
 /// char(0) rather than CAST(UTF-8 blob AS TEXT): SQLite blob casts use the
 /// database encoding and corrupt UTF-8 bytes in UTF-16 databases.
-fn writeEnumText(writer: *std.Io.Writer, text: []const u8) std.Io.Writer.Error!void {
+fn writeText(writer: *std.Io.Writer, text: []const u8) std.Io.Writer.Error!void {
     const has_nul = std.mem.indexOfScalar(u8, text, 0) != null;
     if (has_nul) try writer.writeByte('(');
     var pieces = std.mem.splitScalar(u8, text, 0);
