@@ -28,6 +28,17 @@ pub const PrimaryKey = enum {
     allow_reuse,
 };
 
+/// A resolved literal or trusted SQLite default expression.
+/// No default is represented by a null optional, not `null_value`.
+pub const Default = union(enum) {
+    integer: i64,
+    real: f64,
+    text: []const u8,
+    blob: []const u8,
+    null_value,
+    raw_sql: []const u8,
+};
+
 /// A stored column. Semantic resolution chooses its SQLite storage type.
 pub const Column = struct {
     dsl_name: []const u8,
@@ -35,6 +46,7 @@ pub const Column = struct {
     type: StorageType,
     nullable: bool = false,
     primary_key: PrimaryKey = .none,
+    default: ?Default = null,
 };
 
 /// Virtual relationship metadata; never a stored column.
