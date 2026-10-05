@@ -174,9 +174,11 @@ const Parser = struct {
             const value = self.current;
             default = switch (value.kind) {
                 .integer => .{ .integer = token(value) },
+                .boolean => .{ .boolean = token(value) },
                 .real => .{ .real = token(value) },
                 .string => .{ .text = token(value) },
                 .backtick => .{ .raw_sql = token(value) },
+                .generator => if (std.mem.eql(u8, type_name.text, "datetime")) .{ .generator = token(value) } else return self.fail(value.span, "Generators are supported only for datetime defaults"),
                 .identifier => if (self.word("null")) .{ .null_value = token(value) } else return self.fail(value.span, "Unsupported default; expected a literal or raw SQL"),
                 else => return self.fail(value.span, "Expected default literal"),
             };
@@ -374,7 +376,7 @@ test "parser rejects unsupported syntax, incomplete constructs and invalid scope
         "T\n{}",                    "T { a int }",                              "T {\na int }",                      "T {\na int b int\n}",                             "T {\na int {\n} =\n  #name `a`\n}", "T {\na int = {\n}\n}",            "T {\na int |\n  #name `a`\n}",
         "T {\na int =\n}\n",        "T {\na int =\n -- wrong indentation\n}\n", "T {\na int =\n   #name `a`\n}\n",   "T {\na int =\n  #name `a`\n   #allow reuse\n}\n", "T {\n\ta int\n}\n",                 "--- unattached\n",                "--- detached\n\nT {}",
         "T {\n--- unattached\n}\n", "T {\n--- directive docs\n#name `t`\n}\n",  "T {\na int =\n  --- doc-only\n}\n", "T {\na int --- inline\n}\n",                      "T {\n#allow reuse\n}\n",            "T {\na int {\n#index {}\n}\n}\n", "type Foo {}",
-        "enum Foo {}",              "T {\n_a int\n_ int\n}\n",                  "T {\ntrue int\n}\n",                "T {\na null\n}\n",                                "T {\na bool(true)\n}\n",            "T {\na int(random())\n}\n",       "T {\na int(1 + 2)\n}\n",
+        "enum Foo {}",              "T {\n_a int\n_ int\n}\n",                  "T {\ntrue int\n}\n",                "T {\na null\n}\n",                                "T {\na bool(TRUE)\n}\n",            "T {\na int(random())\n}\n",       "T {\na int(1 + 2)\n}\n",
         "T {\na real(1e3)\n}\n",    "T {\na real(.5)\n}\n",                     "T {\na str(\"x\")\n}\n",            "T {\na str('multi\nline')\n}\n",                  "T {\n#name `unterminated\n}\n",     "T {\na int!\n}\n",                "T {\na int #name `a`\n}\n",
         "T {\na int;\n}\n",
     };

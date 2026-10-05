@@ -2,7 +2,7 @@
 const std = @import("std");
 const resolved = @import("model/resolved.zig");
 
-pub const Error = std.Io.Writer.Error || error{ InvalidIdentifier, NullablePrimaryKey, InvalidIdReuse, InvalidDefault, DefaultOnAutoPrimaryKey };
+pub const Error = std.Io.Writer.Error || error{ InvalidIdentifier, NullablePrimaryKey, InvalidPrimaryKey, InvalidIdReuse, InvalidDefault, DefaultOnAutoPrimaryKey };
 
 /// Emit tables and columns in schema order. Zero-column tables remain skeletons,
 /// not executable SQLite SQL. Relationships are virtual and produce no SQL.
@@ -16,6 +16,7 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
         for (table.columns) |column| {
             if (std.mem.indexOfScalar(u8, column.sql_name, 0) != null) return error.InvalidIdentifier;
             if (column.primary_key != .none and column.nullable) return error.NullablePrimaryKey;
+            if (column.primary_key != .none and column.type == .boolean) return error.InvalidPrimaryKey;
             if (column.primary_key == .allow_reuse and
                 (column.type != .integer or key_count != 1))
             {
@@ -44,9 +45,9 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
             try writeIdentifier(writer, column.sql_name);
             try writer.writeByte(' ');
             try writer.writeAll(switch (column.type) {
-                .integer => "INTEGER",
+                .integer, .boolean => "INTEGER",
                 .real => "REAL",
-                .text => "TEXT",
+                .text, .datetime => "TEXT",
                 .blob => "BLOB",
             });
             if (column.primary_key != .none and key_count == 1 and column.type == .integer) {
@@ -59,6 +60,20 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
             if (column.default) |value| {
                 try writer.writeAll(" DEFAULT ");
                 try writeDefault(writer, value);
+            }
+            if (column.type == .boolean) {
+                // IN yields NULL for SQL NULL, allowing nullable Boolean fields.
+                try writer.writeAll(" CHECK (");
+                try writeIdentifier(writer, column.sql_name);
+                try writer.writeAll(" IN (0, 1))");
+            }
+            if (column.type == .datetime) {
+                var pieces = std.mem.splitScalar(u8, @import("datetime.zig").check, '@');
+                try writer.writeAll(pieces.next().?);
+                while (pieces.next()) |piece| {
+                    try writeIdentifier(writer, column.sql_name);
+                    try writer.writeAll(piece);
+                }
             }
             if (index + 1 < table.columns.len or key_count > 1) try writer.writeByte(',');
             try writer.writeByte('\n');
@@ -102,8 +117,11 @@ fn writeDocumentation(writer: *std.Io.Writer, text: []const u8, indent: []const 
 fn validateDefault(column: resolved.Column, value: resolved.Default) Error!void {
     const valid = switch (value) {
         .integer => column.type == .integer or column.type == .real,
+        .boolean => column.type == .boolean,
         .real => |number| column.type == .real and std.math.isFinite(number),
         .text => column.type == .text,
+        .datetime => |text| column.type == .datetime and @import("datetime.zig").valid(text),
+        .now => column.type == .datetime,
         .blob => column.type == .blob,
         .null_value => column.nullable,
         .raw_sql => true,
@@ -114,8 +132,10 @@ fn validateDefault(column: resolved.Column, value: resolved.Default) Error!void 
 fn writeDefault(writer: *std.Io.Writer, value: resolved.Default) std.Io.Writer.Error!void {
     switch (value) {
         .integer => |number| try writer.print("{d}", .{number}),
+        .boolean => |value_bool| try writer.writeAll(if (value_bool) "1" else "0"),
         .real => |number| try writer.print("{d}", .{number}),
-        .text => |text| {
+        .now => try writer.writeAll("(strftime('%Y-%m-%dT%H:%M:%SZ','now'))"),
+        .text, .datetime => |text| {
             // SQL source cannot contain NUL. Preserve such text through a blob cast.
             if (std.mem.indexOfScalar(u8, text, 0) != null) {
                 try writer.writeAll("(CAST(");
@@ -402,7 +422,7 @@ test "non-integer primary keys are required and do not generate IDs" {
             .text => @embedFile("testdata/emitter/text_primary_key.expect.sql"),
             .real => @embedFile("testdata/emitter/real_primary_key.expect.sql"),
             .blob => @embedFile("testdata/emitter/blob_primary_key.expect.sql"),
-            .integer => unreachable,
+            .integer, .boolean, .datetime => unreachable,
         };
         try std.testing.expectEqualStrings(expected, output.written());
     }
@@ -477,7 +497,7 @@ test "integer primary keys with and without ID reuse" {
 }
 
 test "ID reuse on non-integer primary keys fails before writing" {
-    for ([_]resolved.StorageType{ .text, .real, .blob }) |storage_type| {
+    for ([_]resolved.StorageType{ .text, .real, .blob, .datetime }) |storage_type| {
         var output = std.Io.Writer.Allocating.init(std.testing.allocator);
         defer output.deinit();
         try std.testing.expectError(error.InvalidIdReuse, emit(.{ .tables = &.{

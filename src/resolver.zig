@@ -16,6 +16,7 @@ pub const Category = enum {
     invalid_directive_scope,
     invalid_id_reuse,
     nullable_primary_key,
+    invalid_primary_key,
     default_on_auto_primary_key,
     invalid_default,
     invalid_literal,
@@ -157,9 +158,11 @@ const Context = struct {
                     if (std.ascii.eqlIgnoreCase(previous.sql_name, column_name))
                         return self.fail(.sql_name_collision, if (field_opts.name) |n| n.span else field.name.span, "SQL column names collide (ASCII case-insensitive)");
                 }
-                const storage: resolved.StorageType = if (std.mem.eql(u8, field.type.name.text, "int")) .integer else if (std.mem.eql(u8, field.type.name.text, "real")) .real else if (std.mem.eql(u8, field.type.name.text, "str")) .text else if (std.mem.eql(u8, field.type.name.text, "blob")) .blob else return self.fail(.unknown_type, field.type.name.span, "unknown type; supported builtins are int, real, str, blob");
+                const storage: resolved.StorageType = if (std.mem.eql(u8, field.type.name.text, "int")) .integer else if (std.mem.eql(u8, field.type.name.text, "real")) .real else if (std.mem.eql(u8, field.type.name.text, "str")) .text else if (std.mem.eql(u8, field.type.name.text, "blob")) .blob else if (std.mem.eql(u8, field.type.name.text, "bool")) .boolean else if (std.mem.eql(u8, field.type.name.text, "datetime")) .datetime else return self.fail(.unknown_type, field.type.name.span, "unknown type; supported builtins are int, real, str, blob, bool, datetime");
                 if (field.primary_key and field.type.nullable)
                     return self.fail(.nullable_primary_key, field.type.span, "primary-key fields cannot be nullable");
+                if (field.primary_key and storage == .boolean)
+                    return self.fail(.invalid_primary_key, field.type.name.span, "Boolean fields cannot be primary keys (including composite keys)");
                 if (field_opts.reuse) |span| {
                     if (!field.primary_key or storage != .integer or key_count != 1)
                         return self.fail(.invalid_id_reuse, span, "#allow reuse requires a single integer primary key");
@@ -195,13 +198,20 @@ const Context = struct {
         const token = defaultToken(value);
         const compatible = switch (value) {
             .integer => storage == .integer or storage == .real,
+            .boolean => storage == .boolean,
             .real => storage == .real,
-            .text => storage == .text,
+            .text => storage == .text or storage == .datetime,
+            .generator => storage == .datetime,
             .null_value => nullable,
             .raw_sql => true,
         };
-        if (!compatible) return self.fail(.invalid_default, token.span, "default does not match storage type or nullability");
+        if (!compatible) return self.fail(.invalid_default, token.span, "default does not match column type or nullability");
         return switch (value) {
+            .boolean => blk: {
+                if (std.mem.eql(u8, token.text, "true")) break :blk .{ .boolean = true };
+                if (std.mem.eql(u8, token.text, "false")) break :blk .{ .boolean = false };
+                return self.fail(.invalid_literal, token.span, "expected true or false literal");
+            },
             .integer => .{ .integer = std.fmt.parseInt(i64, token.text, 10) catch
                 return self.fail(.invalid_literal, token.span, "invalid or out-of-range integer literal") },
             .real => blk: {
@@ -210,7 +220,20 @@ const Context = struct {
                 if (!std.math.isFinite(number)) return self.fail(.invalid_literal, token.span, "real literal must be finite");
                 break :blk .{ .real = number };
             },
-            .text => .{ .text = try self.string(token) },
+            .text => blk: {
+                const text = try self.string(token);
+                if (storage == .datetime) {
+                    if (!@import("datetime.zig").valid(text))
+                        return self.fail(.invalid_literal, token.span, "datetime requires a real UTC date in YYYY-MM-DDTHH:MM:SSZ format (years 0001-9999)");
+                    break :blk .{ .datetime = text };
+                }
+                break :blk .{ .text = text };
+            },
+            .generator => blk: {
+                if (!std.mem.eql(u8, token.text, "::now"))
+                    return self.fail(.invalid_literal, token.span, "unsupported generator; only ::now is supported");
+                break :blk .now;
+            },
             .null_value => blk: {
                 if (!std.mem.eql(u8, token.text, "null")) return self.fail(.invalid_literal, token.span, "expected null literal");
                 break :blk .null_value;

@@ -63,7 +63,7 @@ test "unknown names parse and fail in resolution including retired aliases" {
 test "unsupported later slices never produce a partial schema" {
     const sources = [_][]const u8{
         "=> Label str\n",
-        "Label {\n  value bool(true)\n}\n",
+        "Label {\n  value bool(::now)\n}\n",
         "Label {\n  value int(::now)\n}\n",
         "Label {\n  value str =\n    #index {\n      #name `idx`\n    }\n}\n",
         "Label {\n  value int =\n    ? _ > 0\n}\n",

@@ -338,7 +338,16 @@ active bool(true)
 ```
 
 SQLite has no native boolean storage type. SQL `TRUE` and `FALSE` are aliases for
-`1` and `0`.
+`1` and `0`. Boolean literal defaults accept only DSL `true` and `false`, not
+numeric or string literals. Nullable Boolean fields may default to `null`.
+The `IN` check yields SQL null for null input, so nullable fields permit null;
+non-null fields enforce `NOT NULL` separately. Raw SQL defaults remain trusted
+expressions whose results must satisfy these constraints at insertion.
+
+Boolean fields cannot be primary keys, either alone or in composite keys.
+This is a settled language rule, not a temporary limitation. Defaults do not
+change this rule. `#allow reuse` is invalid for Boolean fields. The resolver and
+emitter reject Boolean key membership; no Boolean `WITHOUT ROWID` SQL is emitted.
 
 ### Binary fields
 
@@ -403,7 +412,7 @@ Is allowed; a non-nullable field cannot have a null default.
 Raw SQL defaults use backticks inside the default parentheses:
 
 ```text
-createdAt datetime(`strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`)
+createdAt datetime(`strftime('%Y-%m-%dT%H:%M:%SZ','now')`)
 ```
 
 The compiler adds whatever surrounding SQL syntax SQLite requires for a default
@@ -419,9 +428,10 @@ the resulting value must satisfy the SQLite column constraints when used.
 createdAt datetime(::now)
 ```
 
-`::now` generates a SQLite default producing the current UTC timestamp. It is
-computed by SQLite on insertion, not by the compiler or application. It does not
-refresh a timestamp on update by itself.
+`::now` is the only supported generator and is valid only in datetime defaults.
+It emits `strftime('%Y-%m-%dT%H:%M:%SZ','now')`, producing the current UTC timestamp
+at whole-second precision. It is computed by SQLite on insertion, not by the
+compiler or application. It does not refresh a timestamp on update by itself.
 
 ### Defaults on integer primary keys
 
@@ -1494,18 +1504,28 @@ Store validated `YYYY-MM-DD` text. No timezone is attached to a date.
 createdAt datetime(::now)
 ```
 
-Store datetimes in UTC, in a fixed format, for example:
+The implemented datetime slice accepts exactly `YYYY-MM-DDTHH:MM:SSZ`:
 
 ```text
-2026-07-17T10:30:00.000Z
+2026-07-17T10:30:00Z
 ```
 
-Fixed-format UTC text sorts chronologically, so ordinary comparison checks work.
-Do not store mixed timezone offsets and expect text comparison to compare instants.
+Explicit slice rules: years `0001`–`9999`, real proleptic Gregorian calendar
+dates (including century leap-year rules), hours `00`–`23`, minutes and seconds
+`00`–`59`. UTC uppercase `Z` only. No offsets, leap seconds, or fractional seconds
+(including `.000`). Fractional precision is a later feature.
 
-The design selected UTC and a fixed format, but the exact accepted range,
-precision, and date-validity SQL still need specification. SQLite date functions
-alone must not be assumed to validate every malformed or impossible date.
+Ordinary/raw string defaults are decoded and validated during resolution.
+`::now` is contextual default syntax, supported only for datetime, and emits
+`DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))`. No other generator is supported.
+Raw SQL defaults remain an escape hatch but must satisfy runtime checks.
+
+Datetime retains logical identity and uses SQLite `TEXT` in strict tables, with
+explicit format, range, and calendar CHECK constraints, not permissive SQLite
+date functions. Nullable NULL passes; nonnullable NULL fails. Datetime primary
+keys never generate integer IDs; `#allow reuse` is integer-only.
+Fixed-format UTC text sorts chronologically. Reusable types remain indefinitely
+deferred; date, JSON, enums, and update generators are not part of this slice.
 
 ### Companion timezone field
 
@@ -1566,7 +1586,7 @@ This behavior is based on value changes, not knowing which assignments the user
 wrote. v1 has no generated application hook.
 
 **Trigger implementation requirements:** avoid recursive refresh loops, including
-when two timestamps have the same millisecond value; support composite and keyless
+when two timestamps have the same second value; support composite and keyless
 tables appropriately; use null-safe old/new comparisons. The exact trigger SQL
 and behavior for no-op updates remain implementation details to settle and test.
 

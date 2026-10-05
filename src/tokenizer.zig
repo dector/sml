@@ -5,10 +5,12 @@ const parsed = @import("model/parsed.zig");
 
 pub const Kind = enum {
     identifier,
+    boolean,
     integer,
     real,
     string,
     backtick,
+    generator,
     l_brace,
     r_brace,
     l_paren,
@@ -68,7 +70,8 @@ pub const Tokenizer = struct {
         if (isIdentifierStart(c)) {
             self.pos += 1;
             while (self.pos < self.source.len and isIdentifierContinue(self.source[self.pos])) self.pos += 1;
-            return self.token(.identifier, start);
+            const text = self.source[start..self.pos];
+            return self.token(if (std.mem.eql(u8, text, "true") or std.mem.eql(u8, text, "false")) .boolean else .identifier, start);
         }
         if (c == '-' and self.pos + 1 < self.source.len and self.source[self.pos + 1] == '-') {
             self.pos += 2;
@@ -83,6 +86,14 @@ pub const Tokenizer = struct {
             var end = self.pos;
             while (end < self.source.len and self.source[end] == '#') end += 1;
             if (end < self.source.len and (self.source[end] == '\'' or self.source[end] == '`')) return self.literal(start, end - start, self.source[end]);
+        }
+        if (c == ':' and self.pos + 1 < self.source.len and self.source[self.pos + 1] == ':') {
+            self.pos += 2;
+            if (self.pos == self.source.len or !isIdentifierStart(self.source[self.pos]))
+                return self.fail(start, "expected generator name after '::'");
+            self.pos += 1;
+            while (self.pos < self.source.len and isIdentifierContinue(self.source[self.pos])) self.pos += 1;
+            return self.token(.generator, start);
         }
         self.pos += 1;
         return switch (c) {
@@ -222,7 +233,8 @@ test "ordinary strings double quotes and keep backslashes and punctuation litera
     try expectToken(&s, .string, "''''", 0);
     try expectToken(&s, .backtick, "`a--{}'\\`", 0);
     try expectToken(&s, .string, "'\t'", 0);
-    for ([_][]const u8{ "true", "false", "null" }) |text| try expectToken(&s, .identifier, text, 0);
+    for ([_][]const u8{ "true", "false" }) |text| try expectToken(&s, .boolean, text, 0);
+    try expectToken(&s, .identifier, "null", 0);
 }
 
 test "hash delimiters require exact hash counts and distinguish directives" {

@@ -18,9 +18,11 @@ pub const Table = struct {
     columns: []const Column = &.{},
 };
 
-/// SQLite storage types supported by the resolved model.
+/// Logical column types. Boolean uses INTEGER storage; datetime uses TEXT.
 pub const StorageType = enum {
     integer,
+    boolean,
+    datetime,
     real,
     text,
     blob,
@@ -38,6 +40,9 @@ pub const PrimaryKey = enum {
 /// No default is represented by a null optional, not `null_value`.
 pub const Default = union(enum) {
     integer: i64,
+    boolean: bool,
+    datetime: []const u8,
+    now,
     real: f64,
     text: []const u8,
     blob: []const u8,
@@ -45,7 +50,7 @@ pub const Default = union(enum) {
     raw_sql: []const u8,
 };
 
-/// A stored column. Semantic resolution chooses its SQLite storage type.
+/// A stored column. Semantic resolution chooses its logical/storage type.
 pub const Column = struct {
     dsl_name: []const u8,
     documentation: ?Documentation = null,

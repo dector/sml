@@ -82,10 +82,13 @@ pub const TypeRef = struct {
 /// There is no dedicated blob-literal syntax yet; raw SQL is its escape hatch.
 pub const Default = union(enum) {
     integer: Token,
+    boolean: Token,
     real: Token,
     text: Token,
     null_value: Token,
     raw_sql: Token,
+    /// Contextual generator spelling, including the `::` prefix.
+    generator: Token,
 };
 
 /// Preserve duplicates and source order for later scope/conflict diagnostics.

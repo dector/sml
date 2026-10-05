@@ -15,7 +15,7 @@ The first milestone supports:
 - Braced tables and stored fields.
 - `!` primary-key markers, named type references, and nullable `?`.
 - Defaults represented by the current parsed model: integers, reals, ordinary and
-  raw text strings, null, and raw SQL.
+  raw text strings, booleans (`true`/`false`), null, and raw SQL.
 - `#name` and field-level `#allow reuse`.
 - Built-in string type `str`, emitted as SQLite `TEXT`; `text` and `string` are
   not DSL aliases. The resolver now uses `str`; SQLite storage and internal
@@ -26,8 +26,22 @@ The first milestone supports:
 
 Unknown type names parse successfully; resolution reports unsupported/unknown
 references. Recognizable unsupported syntax produces explicit diagnostics, not
-silently ignored declarations. Booleans, generated defaults, reusable types,
-enums, checks, indexes, FKs, relationships, and connections come in later slices.
+silently ignored declarations. Built-in `bool` is now supported with INTEGER
+storage, a generated `CHECK (column IN (0, 1))`, and type-compatible defaults.
+Boolean fields cannot be primary keys, including composite keys. This is settled
+policy, not deferred work. Boolean `#allow reuse` is invalid. Resolution and
+emission reject Boolean keys before SQL output.
+Built-in `datetime` is supported with TEXT storage and explicit runtime format
+and Gregorian calendar checks. String defaults resolve to validated timestamps.
+Only contextual `datetime(::now)` generator defaults are supported, emitting
+`strftime('%Y-%m-%dT%H:%M:%SZ','now')`. The exact format is
+`YYYY-MM-DDTHH:MM:SSZ`, years 0001–9999, real Gregorian dates, hours 00–23,
+minutes/seconds 00–59. Offsets, leap seconds, and fractional seconds (even `.000`)
+are rejected; fractional precision is later work. Nullable NULL passes. Datetime
+keys are not auto-generated integers. Raw SQL defaults face the same runtime
+checks. See `src/datetime_test.zig` and `src/testdata/datetime_runtime_test.py`.
+Other generators, date/JSON, enums, user checks, indexes, FKs, relationships, and
+connections come in later slices. Reusable types are deferred indefinitely.
 Numeric exponent notation and multiline literals are deferred.
 
 ## Settled syntax

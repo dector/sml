@@ -18,7 +18,10 @@ Use `emitter.emit` to write the resolved schema as SQLite SQL.
 Supported: braced tables, stored fields, `!` keys, nullable `?`, literal defaults,
 `#name`, field `#allow reuse`, declaration docs, and field bodies using braces or
 `=` with exactly two extra spaces. The string type is `str`, not `text` or
-`string`. Unsupported later-v1 syntax returns a diagnostic.
+`string`. Boolean defaults use `true`/`false`; `bool` cannot be a primary key.
+`datetime` accepts whole-second UTC `YYYY-MM-DDTHH:MM:SSZ` and insertion-time
+`::now`. Fractional seconds and reusable types are deferred.
+Unsupported later-v1 syntax returns a diagnostic.
 
 ## Development
 
@@ -28,5 +31,8 @@ Use Zig 0.17.0.
 zig build
 zig build test
 zig fmt --check build.zig build.zig.zon src
+python3 src/testdata/boolean_runtime_test.py
+python3 src/testdata/datetime_runtime_test.py
+python3 src/testdata/encoding_runtime_test.py
 ```
 
