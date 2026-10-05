@@ -7,6 +7,7 @@ const std = @import("std");
 const parsed = @import("model/parsed.zig");
 const resolved = @import("model/resolved.zig");
 const literals = @import("literal_decoder.zig");
+const expression_resolver = @import("expression_resolver.zig");
 
 pub const Category = enum {
     unknown_type,
@@ -23,6 +24,7 @@ pub const Category = enum {
     invalid_literal,
     invalid_enum,
     unsupported_multiline,
+    invalid_check,
 };
 
 pub const Diagnostic = struct {
@@ -77,6 +79,9 @@ const Context = struct {
             .name => |token| {
                 if (result.name != null) return self.fail(.duplicate_directive, directive.span, "duplicate #name directive");
                 result.name = token;
+            },
+            .check => {
+                if (table) return self.fail(.invalid_directive_scope, directive.span, "checks are field-only; table checks are not supported yet");
             },
             .of => {
                 if (table) return self.fail(.invalid_directive_scope, directive.span, "#of is field-only");
@@ -191,6 +196,22 @@ const Context = struct {
                 };
             }
             tables[i] = .{ .dsl_name = try self.allocator.dupe(u8, table.name.text), .sql_name = sql_name, .columns = columns, .documentation = try self.documentation(table.documentation) };
+            // Metadata (including final SQL names) must exist before resolving `_`.
+            for (table.fields, 0..) |field, j| {
+                var checks: std.ArrayList(resolved.Expression) = .empty;
+                for (field.directives) |directive| {
+                    if (directive.kind != .check) continue;
+                    const result = try expression_resolver.resolveInto(self.allocator, directive.kind.check, .{ .table = tables[i], .field_index = j });
+                    const expression = switch (result) {
+                        .expression => |expression| expression,
+                        .diagnostic => |d| return self.fail(.invalid_check, d.span, d.message),
+                    };
+                    if (expression_resolver.validateCheckResult(&expression)) |d|
+                        return self.fail(.invalid_check, d.span, d.message);
+                    try checks.append(self.allocator, expression);
+                }
+                columns[j].checks = try checks.toOwnedSlice(self.allocator);
+            }
         }
         return .{ .tables = tables };
     }

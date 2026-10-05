@@ -65,6 +65,8 @@ pub const Column = struct {
     nullable: bool = false,
     primary_key: PrimaryKey = .none,
     default: ?Default = null,
+    /// Explicit field checks in source order; builtin checks are emitted separately.
+    checks: []const Expression = &.{},
 };
 
 /// Virtual relationship metadata; never a stored column.

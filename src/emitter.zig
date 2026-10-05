@@ -5,8 +5,9 @@ const writeIdentifier = sql_writer.writeIdentifier;
 const writeText = sql_writer.writeText;
 const writeBlob = sql_writer.writeBlob;
 const resolved = @import("model/resolved.zig");
+const expression_emitter = @import("expression_emitter.zig");
 
-pub const Error = std.Io.Writer.Error || error{ InvalidIdentifier, NullablePrimaryKey, InvalidPrimaryKey, InvalidIdReuse, InvalidDefault, InvalidEnum, DefaultOnAutoPrimaryKey };
+pub const Error = expression_emitter.Error || error{ NullablePrimaryKey, InvalidPrimaryKey, InvalidIdReuse, InvalidDefault, InvalidEnum, DefaultOnAutoPrimaryKey, InvalidCheck };
 
 /// Emit tables and columns in schema order. Zero-column tables remain skeletons,
 /// not executable SQLite SQL. Relationships are virtual and produce no SQL.
@@ -30,6 +31,10 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
             if (column.type == .enumeration) {
                 if (!@import("enumeration.zig").valid(column.enum_values)) return error.InvalidEnum;
             } else if (column.enum_values.len != 0) return error.InvalidEnum;
+            for (column.checks) |check| {
+                try expression_emitter.preflight(check);
+                if (@import("expression_resolver.zig").validateCheckResult(&check) != null) return error.InvalidCheck;
+            }
             if (column.default) |value| {
                 if (column.primary_key != .none and key_count == 1 and column.type == .integer)
                     return error.DefaultOnAutoPrimaryKey;
@@ -92,6 +97,11 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
                     try writeIdentifier(writer, column.sql_name);
                     try writer.writeAll(piece);
                 }
+            }
+            for (column.checks) |check| {
+                try writer.writeAll(" CHECK (");
+                try expression_emitter.emit(check, writer);
+                try writer.writeByte(')');
             }
             if (index + 1 < table.columns.len or key_count > 1) try writer.writeByte(',');
             try writer.writeByte('\n');

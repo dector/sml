@@ -1,4 +1,4 @@
-//! Standalone SQLite expression generation; no schema constraint integration.
+//! SQLite expression generation, shared by standalone expressions and CHECKs.
 const std = @import("std");
 const resolved = @import("model/resolved.zig");
 const model = @import("model/resolved_expression.zig");
@@ -10,8 +10,12 @@ pub const Error = std.Io.Writer.Error || error{ InvalidIdentifier, InvalidLitera
 /// Preflight the entire tree before writing. Scalars are permitted; operand and
 /// CHECK-root typing belong to the resolver. Raw SQL is trusted, not rewritten
 /// or syntax-validated. Writer failures may leave partial output. Caller flushes.
-pub fn emit(expression: resolved.Expression, writer: *std.Io.Writer) Error!void {
+pub fn preflight(expression: resolved.Expression) Error!void {
     try validate(&expression, 0);
+}
+
+pub fn emit(expression: resolved.Expression, writer: *std.Io.Writer) Error!void {
+    try preflight(expression);
     try write(&expression, writer);
 }
 

@@ -3,6 +3,7 @@
 const std = @import("std");
 const parsed = @import("model/parsed.zig");
 const tokenizer = @import("tokenizer.zig");
+const expression_parser = @import("expression_parser.zig");
 
 pub const Result = parsed.Result;
 pub const Diagnostic = parsed.Diagnostic;
@@ -141,7 +142,7 @@ const Parser = struct {
                     break;
                 }
                 if (self.current.kind == .eof) return self.fail(self.current.span, "Expected '}' to close table");
-                if (self.current.kind == .hash) {
+                if (self.current.kind == .hash or self.current.kind == .question) {
                     try self.noDocs(field_docs);
                     try directives.append(self.allocator, try self.directive(false));
                     try self.lineEnd();
@@ -253,8 +254,33 @@ const Parser = struct {
         while (self.current.kind == .newline or self.current.kind == .comment) try self.advance();
     }
 
+    fn check(self: *Parser, start: usize) Error!parsed.Directive {
+        var p: expression_parser.Parser = .{ .lexer = &self.lexer, .allocator = self.allocator, .current = self.current };
+        const expression = p.parseExpression() catch |err| {
+            self.current = p.current;
+            self.diagnostic = p.diagnostic;
+            return err;
+        };
+        self.current = p.current;
+        if (self.current.kind == .l_brace) return self.fail(self.current.span, "Named check bodies are not supported yet; use #check expr");
+        return .{ .kind = .{ .check = expression }, .span = .{ .start = start, .end = expression.span.end } };
+    }
+
     fn directive(self: *Parser, field_scope: bool) Error!parsed.Directive {
-        const hash = try self.take(.hash, "Expected supported directive (#name or field-level #allow reuse)");
+        if (self.current.kind == .question) {
+            const marker = self.current;
+            if (!field_scope) return self.fail(marker.span, "Checks are field-only; table checks are not supported yet");
+            try self.advance();
+            if (self.current.kind == .question) return self.fail(self.current.span, "Table checks (??) are not supported yet; use ? expr in a field body");
+            return self.check(marker.span.start);
+        }
+        const hash = try self.take(.hash, "Expected supported field directive or ? expression");
+        if (self.word("check")) {
+            if (!field_scope) return self.fail(self.current.span, "#check is field-only; table checks are not supported yet");
+            try self.advance();
+            if (self.current.kind == .l_brace) return self.fail(self.current.span, "Named check bodies are not supported yet; use #check expr");
+            return self.check(hash.span.start);
+        }
         if (self.word("name")) {
             try self.advance();
             const value = try self.take(.backtick, "#name requires a backtick literal");

@@ -26,6 +26,24 @@ TEXT storage, and allowed-value checks. Bare enum words match
 Use whitespace before a `--` comment after a bare enum value (`a--b` is text).
 Duplicate decoded values and empty sets are rejected; nullable enums may default
 to `null`. Fractional seconds are deferred; reusable types are deferred indefinitely.
+Field bodies support `? expr` and `#check expr` in either body form:
+
+```text
+Sample {
+  value int? =
+    ? _ > 0
+    #check _ < 10
+}
+```
+
+`_` refers only to that field, using its final SQL name; ordinary identifier
+references are rejected in field checks. Backtick raw SQL is trusted and may
+refer to other SQL columns, but `_` is not substituted within it. Roots must be
+Boolean or trusted raw SQL. Nullable Boolean UNKNOWN passes SQLite CHECK;
+use `_ != null` to explicitly reject NULL, or a nonnullable field for NOT NULL.
+Explicit checks preserve source order and coexist with builtin type checks.
+Docs cannot target checks. Table checks (`??`/table `#check`), named check bodies,
+unique constraints, and indexes are not supported yet.
 Unsupported later-v1 syntax returns a diagnostic.
 
 `expression_parser.parse(allocator, source)` separately parses one literal,
@@ -44,7 +62,7 @@ inside parentheses; indentation there is only formatting (leading tabs still fai
 Bare line continuations, dotted names, hyphenated enum references, single `|` pipe
 bodies, and arithmetic are not supported; negative numeric literals remain valid.
 References are not resolved, reusable types are deferred indefinitely, and this API
-does not extend schema defaults or constraints.
+does not extend schema defaults; field checks use the same stream parser.
 
 `expression_resolver.resolve(allocator, expression, context)` owns its resolved
 result and permits scalar roots. For CHECKs, also call
@@ -70,7 +88,10 @@ Grouping and operand order are preserved. Ordering against `null` is rejected.
 Raw SQL has unknown type and is trusted, including whole CHECK roots, but cannot
 excuse a known non-Boolean logical operand or known Boolean/blob ordering operand.
 Raw SQL text `NULL` stays opaque; it is not a DSL null literal. Parsed operators
-remain unchanged. Schema constraints are not added by these standalone APIs.
+remain unchanged. The standalone APIs do not add schema constraints.
+`expression_resolver.resolveInto(allocator, expression, context)` allocates into
+a caller-owned arena and returns an expression or diagnostic without a child
+arena; schema resolution uses this to own all check strings and trees.
 
 `expression_emitter.emit(resolved.Expression, *std.Io.Writer) Error!void` writes
 one SQLite expression (no statement or newline). It accepts scalar roots; use
@@ -83,7 +104,9 @@ or any other content.
 
 Preflight rejects structural depth above 256, nonfinite numbers, empty/NUL SQL
 names, empty/NUL raw SQL, invalid enum tags, and unlowered comparisons with null
-before writing anything. It does not duplicate resolver operand typing or parse
+before writing anything. `expression_emitter.preflight(expression)` exposes the
+same validation without output. Schema emission preflights every check and
+validates CHECK roots before any SQL is written. It does not duplicate resolver operand typing or parse
 trusted SQL. Writer failures return `error.WriteFailed` and may leave partial
 output; callers own and flush the writer.
 
@@ -100,5 +123,6 @@ python3 src/testdata/datetime_runtime_test.py
 python3 src/testdata/encoding_runtime_test.py
 python3 src/testdata/enum_runtime_test.py
 python3 src/testdata/expression_runtime_test.py
+python3 src/testdata/check_runtime_test.py
 ```
 

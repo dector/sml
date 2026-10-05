@@ -24,4 +24,5 @@ test {
     _ = @import("boolean_test.zig");
     _ = @import("datetime_test.zig");
     _ = @import("enum_test.zig");
+    _ = @import("check_test.zig");
 }

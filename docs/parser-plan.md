@@ -2,7 +2,9 @@
 
 Status: the first supported parser milestone (stages 1–4) is implemented and
 covered by tokenizer, parser, allocation-failure, and source-to-SQL tests.
-Stage 5 remains future work; unsupported syntax is diagnosed rather than ignored.
+Stage 5 is partially implemented through Slice12 field checks; table checks,
+named check bodies, uniqueness, and indexes remain future work. Unsupported
+syntax is diagnosed rather than ignored.
 See [the language design](design-v1.md) for broader v1 scope.
 
 ## Goal and first milestone
@@ -65,7 +67,24 @@ preserve text in UTF-8/UTF-16; the older NUL `str` blob-cast default has a known
 UTF-16 encoding bug (see design section 15). Tests: `src/enum_test.zig`, the
 `enum.pzl`/SQL fixture, and `src/testdata/enum_runtime_test.py`.
 
-Other generators, date/JSON, user checks, indexes, FKs, relationships, and
+Slice12 field checks are implemented end-to-end: `? expr` and `#check expr`
+in both `=` and braced field bodies. The expression stream parser retains
+original byte spans, nesting limits, and multiline trivia inside parentheses.
+Trailing type `?` still means nullable. Docs cannot attach to checks.
+
+Resolution waits for column metadata and final SQL names, then resolves each
+check in field scope: `_` is the current field only; identifiers are forbidden.
+Backtick raw SQL is trusted and may refer to other SQL names without placeholder
+rewriting. Boolean (including nullable Boolean) or raw-SQL roots are required.
+Resolved columns own an ordered `checks` expression array in the schema arena.
+The emitter preflights all expressions and roots before any SQL; explicit checks
+follow builtin enum/bool/datetime checks and preserve their source order.
+`_ != null` emits `IS NOT NULL`; ordinary nullable comparisons retain SQL UNKNOWN.
+Table `??`/`#check` and named check bodies receive explicit unsupported diagnostics.
+Tests: `src/check_test.zig`, `src/check_extra_test.zig`, `checks.pzl`/SQL fixture,
+and `src/testdata/check_runtime_test.py`.
+
+Other generators, date/JSON, table checks, indexes, FKs, relationships, and
 connections come in later slices. Reusable types are deferred indefinitely.
 Numeric exponent notation and multiline literals are deferred.
 
@@ -243,7 +262,7 @@ Add `src/parser.zig`. Parse one complete file into the existing table/field mode
 with the documentation extension. Support alternate indentation-based `=` and
 braced field bodies, nullable type references, defaults, and the modeled directives.
 
-Use syntactic context to distinguish nullable `?` from future check markers.
+Use syntactic context to distinguish trailing nullable `?` from field-body check markers.
 Track indentation only for active `=` bodies, not for braced or parenthesized
 content. Never silently truncate input or ignore unknown syntax. Unknown type
 names remain unresolved tokens.
@@ -278,7 +297,7 @@ Extend syntax models, parser, resolver, emitter, and tests together:
 
 1. Additional defaults and date/JSON types. Inline enums are complete;
    reusable types remain deferred indefinitely.
-2. Expression precedence, checks, uniqueness, and indexes.
+2. Table checks, named check bodies, uniqueness, and indexes (expression precedence and field checks are implemented).
 3. Stored FKs and virtual relationships.
 4. Named/unnamed connections, roles, generated keys, and destination hints.
 5. Remaining directives and multiline literals after their rules are finalized.

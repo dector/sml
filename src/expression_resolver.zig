@@ -32,6 +32,25 @@ pub const OwnedExpression = struct {
     }
 };
 pub const Result = union(enum) { expression: OwnedExpression, diagnostic: Diagnostic };
+pub const IntoResult = union(enum) { expression: resolved.Expression, diagnostic: Diagnostic };
+
+/// Allocate directly into a caller-owned arena. All expression strings are copied.
+/// The caller reclaims allocations on either success or diagnostic.
+pub fn resolveInto(allocator: std.mem.Allocator, input: parsed.Expression, context: Context) std.mem.Allocator.Error!IntoResult {
+    if (context.field_index) |index| {
+        if (index >= context.table.columns.len) return .{ .diagnostic = .{
+            .category = .invalid_context,
+            .span = input.span,
+            .message = "field index is outside the context table",
+        } };
+    }
+    var worker: Worker = .{ .allocator = allocator, .context = context };
+    const expression = worker.expression(input, 0) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.SemanticFailure => return .{ .diagnostic = worker.diagnostic.? },
+    };
+    return .{ .expression = expression };
+}
 
 /// The result borrows neither input nor context. Semantic failures own no arena;
 /// their messages are static. Allocation failures are returned separately.
@@ -45,15 +64,14 @@ pub fn resolve(allocator: std.mem.Allocator, input: parsed.Expression, context: 
     }
     var arena = std.heap.ArenaAllocator.init(allocator);
     errdefer arena.deinit();
-    var worker: Worker = .{ .allocator = arena.allocator(), .context = context };
-    const expression = worker.expression(input, 0) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        error.SemanticFailure => {
+    const result = try resolveInto(arena.allocator(), input, context);
+    switch (result) {
+        .diagnostic => |diagnostic| {
             arena.deinit();
-            return .{ .diagnostic = worker.diagnostic.? };
+            return .{ .diagnostic = diagnostic };
         },
-    };
-    return .{ .expression = .{ .expression = expression, .arena = arena } };
+        .expression => |expression| return .{ .expression = .{ .expression = expression, .arena = arena } },
+    }
 }
 
 /// Validate a resolved CHECK root separately; resolve() also permits scalars.
@@ -65,9 +83,16 @@ pub fn validateCheckResult(expression: *const resolved.Expression) ?Diagnostic {
         if (depth >= max_depth) return .{ .category = .excessive_depth, .span = expression.span, .message = "Expression structural depth exceeds maximum of 256" };
         root = root.kind.grouping;
     }
-    if (root.type_info) |info| {
-        if (info.type == .boolean) return null;
-    } else if (root.kind == .raw_sql) return null;
+    // Directly constructed models cannot turn a scalar literal into a CHECK
+    // root merely by attaching Boolean metadata.
+    switch (root.kind) {
+        .integer, .real, .text, .null_value => {},
+        else => {
+            if (root.type_info) |info| {
+                if (info.type == .boolean) return null;
+            } else if (root.kind == .raw_sql) return null;
+        },
+    }
     return .{ .category = .invalid_check_type, .span = expression.span, .message = "CHECK expression must be Boolean or trusted raw SQL" };
 }
 
