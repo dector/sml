@@ -28,6 +28,17 @@ Duplicate decoded values and empty sets are rejected; nullable enums may default
 to `null`. Fractional seconds are deferred; reusable types are deferred indefinitely.
 Unsupported later-v1 syntax returns a diagnostic.
 
+`expression_parser.parse(allocator, source)` separately parses one literal,
+ordinary identifier reference (`[A-Za-z_][A-Za-z0-9_]*`), or standalone `_`
+current-value expression. `true`, `false`, and `null` remain literals; words
+such as `str`, `unique`, and `now` are references here. The result is an owned
+`.expression` or a `.diagnostic`; call `result.expression.deinit()` on success
+and keep the source alive because token text borrows it. Surrounding blank lines
+and ordinary comments are allowed, but docs and trailing expressions are not.
+Dotted names, hyphenated enum references, parentheses, and operators are not yet
+supported. References are not resolved, reusable types remain unsupported, and
+this API does not extend schema defaults or constraints.
+
 ## Development
 
 Use Zig 0.17.0.

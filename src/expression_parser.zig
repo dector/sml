@@ -1,4 +1,4 @@
-//! Literal-only expression parsing. Token text borrows source, which must
+//! Literal and reference expression parsing. Token text borrows source, which must
 //! outlive the result. Numeric conversion and literal decoding belong to resolution.
 const std = @import("std");
 const parsed = @import("model/parsed.zig");
@@ -22,7 +22,7 @@ pub const Result = union(enum) {
 /// Parses exactly one single-line expression, allowing surrounding blank lines
 /// and ordinary comments, but never documentation or a second expression.
 /// No partial result escapes on syntax errors or allocation failure.
-/// Literal leaves currently require no allocations; the arena owns future trees.
+/// Leaves currently require no allocations; the arena owns future trees.
 pub fn parse(allocator: std.mem.Allocator, source: []const u8) std.mem.Allocator.Error!Result {
     var arena = std.heap.ArenaAllocator.init(allocator);
     errdefer arena.deinit();
@@ -36,7 +36,7 @@ pub fn parse(allocator: std.mem.Allocator, source: []const u8) std.mem.Allocator
 }
 
 /// Reusable stream parser. Supply `current` from `lexer.next()`; the lexer must
-/// already be positioned after that token. parseExpression consumes one literal
+/// already be positioned after that token. parseExpression consumes one leaf
 /// and leaves the next token in `current`, including newline or closing brace.
 /// It does not skip trivia or validate the enclosing construct's terminator.
 /// All spans remain offsets into the original lexer source.
@@ -70,12 +70,14 @@ pub const Parser = struct {
             .backtick => .{ .raw_sql = token },
             .identifier => if (std.mem.eql(u8, value.text, "null"))
                 .{ .null_value = token }
+            else if (std.mem.eql(u8, value.text, "_"))
+                .{ .current_value = token }
             else
-                return self.fail(value.span, "References and operators are not supported; expected a literal"),
+                .{ .identifier = token },
             .l_paren, .r_paren => return self.fail(value.span, "Parenthesized expressions are not supported"),
             .bang, .equal, .question => return self.fail(value.span, "Operators are not supported"),
             .doc => return self.fail(value.span, "Documentation is not allowed in expressions"),
-            else => return self.fail(value.span, "Expected a literal expression"),
+            else => return self.fail(value.span, "Expected a literal or reference expression"),
         };
         try self.advance();
         return .{ .kind = kind, .span = value.span };
@@ -127,11 +129,71 @@ test "literal kinds preserve spans, delimiters, spelling and borrowed text" {
     }
 }
 
+test "references and contextual words preserve exact spans and borrowed names" {
+    const cases = .{
+        .{ "field", .identifier },
+        .{ "startsAt", .identifier },
+        .{ "Author", .identifier },
+        .{ "_field2", .identifier },
+        .{ "__", .identifier },
+        .{ "str", .identifier },
+        .{ "unique", .identifier },
+        .{ "now", .identifier },
+        .{ "and", .identifier },
+        .{ "or", .identifier },
+        .{ "trueValue", .identifier },
+        .{ "false_", .identifier },
+        .{ "null2", .identifier },
+        .{ "True", .identifier },
+        .{ "Null", .identifier },
+        .{ "_", .current_value },
+    };
+    inline for (cases) |case| {
+        const source = "-- heading\r\n  " ++ case[0] ++ " -- end\n";
+        var result = try parse(std.testing.allocator, source);
+        try std.testing.expect(result == .expression);
+        defer result.expression.deinit();
+        const expression = result.expression.expression;
+        try std.testing.expect(expression.kind == case[1]);
+        const token = @field(expression.kind, @tagName(case[1]));
+        const start = "-- heading\r\n  ".len;
+        try std.testing.expectEqualDeep(parsed.Span{ .start = start, .end = start + case[0].len }, expression.span);
+        try std.testing.expectEqualDeep(expression.span, token.span);
+        try std.testing.expectEqualStrings(case[0], token.text);
+        try std.testing.expect(token.text.ptr == source[start..].ptr);
+    }
+}
+
+test "current value is expression syntax, not a declaration name or default" {
+    const schema_parser = @import("parser.zig");
+    for ([_][]const u8{ "_ {}", "T {\n  _ str\n}", "T {\n  value str = _\n}" }) |source| {
+        const result = try schema_parser.parse(std.testing.allocator, source);
+        try std.testing.expect(result == .diagnostic);
+    }
+}
+
+test "reference grammar rejects dotted and enum names, trailing tokens and docs" {
+    const cases = [_][]const u8{
+        "Author.name",     "in-progress",     "a-1",        "_x.y",            "_.value",
+        "field other",     "field\nother",    "_ _",        "field -- end\n_", "--- docs\nfield",
+        "field\n--- docs", "_ --- inline",    "(field)",    "!_",              "field = other",
+        "_?",              "field and other", "field str?", "::now",           "#unique",
+        "field {}",
+    };
+    for (cases) |source| {
+        const result = try parse(std.testing.allocator, source);
+        try std.testing.expect(result == .diagnostic);
+        try std.testing.expect(result.diagnostic.message.len > 0);
+        try std.testing.expect(result.diagnostic.span.start <= result.diagnostic.span.end);
+        try std.testing.expect(result.diagnostic.span.end <= source.len);
+    }
+}
+
 test "reject empty, incomplete, unsupported and trailing syntax" {
     const cases = [_][]const u8{
         "",            " \n-- comment",   "--- docs\n1", "1\n--- docs",     "1 --- inline",
         "'unfinished", "#'unfinished'##", "`unfinished", "'a\nb'",          "1.",
-        "1e3",         "foo",             "_",           "(1)",             "!true",
+        "1e3",         "foo.bar",         "in-progress", "(1)",             "!true",
         "1 = 2",       "1 + 2",           "1 < 2",       "true and false",  "::now",
         "#name",       "1 2",             "1\n2",        "1 -- comment\n2", "1\n+ 2",
         "1 }",         "null?",
@@ -153,21 +215,25 @@ test "diagnostics retain original source offsets" {
 }
 
 test "stream parsing preserves next token and original spans" {
-    for ([_][]const u8{ "prefix 001\nnext", "prefix 001}" }) |source| {
-        var lexer = tokenizer.Tokenizer.init(source);
-        _ = lexer.next(); // An enclosing parser already consumed the prefix.
-        var p: Parser = .{ .lexer = &lexer, .current = lexer.next().token };
-        const expression = try p.parseExpression();
-        try std.testing.expectEqualDeep(parsed.Span{ .start = 7, .end = 10 }, expression.span);
-        try std.testing.expect(p.current.kind == .newline or p.current.kind == .r_brace);
-        try std.testing.expectEqual(@as(usize, 10), p.current.span.start);
+    inline for (.{ "001", "field", "_" }) |leaf| {
+        for ([_][]const u8{ "prefix " ++ leaf ++ "\nnext", "prefix " ++ leaf ++ "}" }) |source| {
+            var lexer = tokenizer.Tokenizer.init(source);
+            _ = lexer.next(); // An enclosing parser already consumed the prefix.
+            var p: Parser = .{ .lexer = &lexer, .current = lexer.next().token };
+            const expression = try p.parseExpression();
+            try std.testing.expectEqualDeep(parsed.Span{ .start = 7, .end = 7 + leaf.len }, expression.span);
+            try std.testing.expect(p.current.kind == .newline or p.current.kind == .r_brace);
+            try std.testing.expectEqual(@as(usize, 7 + leaf.len), p.current.span.start);
+        }
     }
 }
 
 fn allocationSuccess(allocator: std.mem.Allocator) !void {
-    var result = try parse(allocator, "#'borrowed'# -- end");
-    try std.testing.expect(result == .expression);
-    defer result.expression.deinit();
+    for ([_][]const u8{ "#'borrowed'# -- end", "field -- end", "_ -- end" }) |source| {
+        var result = try parse(allocator, source);
+        try std.testing.expect(result == .expression);
+        defer result.expression.deinit();
+    }
 }
 
 fn allocationFailure(allocator: std.mem.Allocator) !void {
@@ -178,7 +244,7 @@ fn allocationFailure(allocator: std.mem.Allocator) !void {
 test "allocation failure checks cover successful and rejected input" {
     try std.testing.checkAllAllocationFailures(std.testing.allocator, allocationSuccess, .{});
     try std.testing.checkAllAllocationFailures(std.testing.allocator, allocationFailure, .{});
-    // Literal parsing must also work when the backing allocator cannot allocate.
+    // Leaf parsing must also work when the backing allocator cannot allocate.
     var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
     try allocationSuccess(failing.allocator());
     try allocationFailure(failing.allocator());
