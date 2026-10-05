@@ -7,7 +7,9 @@ indexes, and relationships, and compiles them into fresh-schema SQLite SQL.
 
 This document consolidates the design discussion. **Settled rules** are described
 below. Where the discussion did not settle an implementation detail, it is listed
-under **Open decisions** rather than silently made part of the language.
+under **Open decisions** rather than silently made part of the language. See the
+[parser implementation plan](parser-plan.md) for the settled initial-parser scope;
+these syntax decisions require implementation updates, not just resolver changes.
 
 ### v1 scope
 
@@ -34,7 +36,7 @@ compatibility mode.
 Book {
   !id int
 
-  title text =
+  title str =
     ? ::notEmpty
     #index
 
@@ -55,13 +57,13 @@ Book {
 
 Publisher {
   !id int
-  name text
+  name str
   ~books Book[] @Book.publisher
 }
 
 Author {
   !id int
-  name text
+  name str
   ~books Book[] @Authorship.authorId
 }
 
@@ -94,8 +96,8 @@ v1 constraint catalog.
 | `~(A, B) { ... }` | Unnamed connection table |
 | `~~` | Expand generated connection keys |
 | `=> Name Type` | Reusable type declaration; does not create a table |
-| `=` followed by indentation | Field/type body |
-| `{ ... }` | Braced body, without a preceding `=` |
+| `declaration =` | Field/type body with direct items indented exactly two spaces beyond the declaration |
+| `{ ... }` | Alternative braced body; cannot mix with an `=` body |
 | `? rule` | Field/type constraint; shorthand for `#check rule` |
 | `?? rule` | Table constraint; shorthand for `#check rule` |
 | `_` | Current value in field/type DSL expressions |
@@ -114,18 +116,20 @@ current syntax.
 ```text
 Author {
   !id int
-  name text
+  name str
 }
 ```
 
-A table never uses an indentation-only body. There is no `=` before its `{`.
+A table never uses an `=` indentation body. Its opening `{` must be on
+the declaration line and its closing `}` on its own line. Empty tables may use
+`Table {}`. Connection tables follow the same brace rules.
 
 ### Fields and reusable types have two body forms
 
-Indentation-based:
+`=` with indentation:
 
 ```text
-email text? =
+email str? =
   #name `email_address`
   ? unique
 ```
@@ -133,35 +137,49 @@ email text? =
 Braced:
 
 ```text
-email text? {
+email str? {
   #name `email_address`
   ? unique
 }
 ```
 
-Use either `=` or `{}`, **not both**. A field without options needs no body:
+Use either `=` with an indented body or `{}`, **not both on the same declaration**.
+A field without options needs no body:
 
 ```text
-name text
+name str
 active bool(true)
 ```
 
-Indentation determines the scope after `=`. Braces determine scope in a braced
-body; formatting indentation alone does not determine that scope. An indented
-body nested inside braces still follows its own indentation rules.
+Each direct item in an `=` body must be indented exactly two spaces beyond the
+declaration's actual indentation, regardless of its surrounding brace scope.
+Sibling direct items must match that indentation; deeper indentation is allowed
+only inside nested braced option bodies. A dedent to the declaration's indentation
+or less, or the enclosing closing brace, ends the body. Other direct-item
+indentation is an error. Blank lines and ordinary comments neither establish nor
+end indentation scope. A body containing only a correctly indented `-- TODO`
+comment is valid; a truly empty `=` body is an error.
 
-Index option bodies are a v1 exception: they support braces only, not `#index =`.
-Constraint option examples likewise use braces; no indentation-based constraint
-option form has been settled.
+Braced bodies have independent formatting: indentation does not establish their
+scope or require a particular width. For every braced body, including fields,
+reusable types, and index/constraint options, the opening `{` stays on the
+declaration or option header line and the closing `}` occupies its own line.
+Empty braced bodies may use `{}` on the header line. A declaration cannot mix an
+`=` body with a braced body, though direct items may have nested braced options.
+
+Index and constraint option bodies support braces only, never `=` bodies.
 
 Declarations are order-independent. Resolve table and reusable-type references
 after reading the whole file. Unknown references and circular reusable types are
 compile errors.
 
-**Open parsing details:** exact indentation width, tabs, same-line statement
-separators, and multiline expression continuation are not yet specified. Examples
-use spaces and separate declarations with newlines. Braces remove dependence on
-indentation; they do not imply an agreed semicolon/comma statement grammar.
+Use one declaration per line; semicolon statement separators are unsupported.
+Leading indentation tabs are forbidden except inside literal content. Space
+indentation is formatting only in braced scopes, but establishes `=` body scope
+with the exact two-space offset described above.
+
+Expressions may span lines only inside parentheses; continuation indentation is
+ignored. Strings and backtick literals are single-line in the initial parser.
 
 ## 4. Comments and documentation
 
@@ -169,14 +187,22 @@ indentation; they do not imply an agreed semicolon/comma statement grammar.
 --- Public author information.
 Author {
   --- Displayed beside a book title.
-  name text
+  name str
 
   -- Internal note; omit this from SQL output.
 }
 ```
 
-- `--` comments are source-only.
-- `---` doc comments are preserved as comments in generated SQL.
+- `--` comments are source-only and may be standalone or inline.
+- `---` doc comments must occupy standalone lines. Consecutive doc lines attach
+  to the next declaration. Strip one optional space after each `---` and join
+  their contents with newline characters.
+- A blank line breaks doc attachment; ordinary comments preserve it. Unattached
+  documentation is an error, including docs separated from their target by a
+  blank line or left at the end of a scope.
+- Doc targets are tables, fields (including relationships), reusable types, and
+  connections, not directives or constraints.
+- Attached docs are preserved as comments in generated SQL.
 - Comment-looking characters inside strings and raw SQL are content, not DSL
   comments.
 - Documentation attached to a `~` relationship is permitted even though the
@@ -189,6 +215,10 @@ object.
 ## 5. Names
 
 ### DSL names versus SQL names
+
+DSL identifiers are ASCII: `[A-Za-z_][A-Za-z0-9_]*`. Standalone `_` is reserved
+for the current-value expression, not a declaration name. `true`, `false`, and
+`null` are reserved literals; other keywords are contextual.
 
 Use camelCase for fields and PascalCase for tables/types. The compiler converts
 DSL object names to snake_case SQL names by default:
@@ -217,7 +247,7 @@ Author {
   !id int =
     #name `person_id`
 
-  email text =
+  email str =
     #name `contact_address`
     ? unique {
       #name `uq_people_contact_address`
@@ -260,8 +290,9 @@ becomes `http_server`, `URLValue` becomes `url_value`, and `tenantId` becomes
 `tenant_id`. Existing underscores are preserved.
 
 **Open naming details:** generated index/trigger names and explicit naming of a
-primary-key constraint need final rules. Embedded backticks in `#name` arguments
-have no settled escape convention; the supported-subset resolver rejects them.
+primary-key constraint need final rules. Hash-delimited backticks support embedded
+backticks (see section 8); the current supported-subset resolver still rejects
+these and must be updated.
 
 ## 6. Built-in types and nullability
 
@@ -269,7 +300,7 @@ have no settled escape convention; the supported-subset resolver rejects them.
 | --- | --- | --- |
 | `int` | `INTEGER` | SQLite strict typing |
 | `real` | `REAL` | SQLite strict typing |
-| `text` | `TEXT` | SQLite strict typing |
+| `str` | `TEXT` | SQLite strict typing |
 | `blob` | `BLOB` | SQLite strict typing |
 | `bool` | `INTEGER` | Value must be `0` or `1` |
 | `date` | `TEXT` | Valid date in `YYYY-MM-DD` format |
@@ -277,13 +308,14 @@ have no settled escape convention; the supported-subset resolver rejects them.
 | `json` | `TEXT` | `json_valid` |
 | `enum` | `TEXT` | Allowed-value check |
 
-There are no initial aliases such as `string`, `float`, or `boolean`.
+The string built-in is `str`, not `text`; it maps to SQLite `TEXT`.
+There are no initial aliases such as `text`, `string`, `float`, or `boolean`.
 
 Fields are non-null unless their type ends in `?`:
 
 ```text
-name text
-nickname text?
+name str
+nickname str?
 active bool(true)
 ```
 
@@ -332,7 +364,7 @@ Stored arrays use JSON or a separate table:
 tags json('[]')
 ```
 
-`tags text[]` is a compile error. Collection relationships are never nullable;
+`tags str[]` is a compile error. Collection relationships are never nullable;
 `Book[]?` is invalid.
 
 ## 7. Defaults
@@ -343,10 +375,15 @@ Parentheses after a type specify the field's default, not type parameters:
 count int(0)
 price real(0)
 active bool(true)
-title text('Untitled')
-nickname text?('Anonymous')
+title str('Untitled')
+nickname str?('Anonymous')
 createdAt datetime(::now)
 ```
+
+Numeric literals are decimal, with an optional leading minus. Leading zeros are
+allowed. A fractional part requires digits on both sides of the decimal point.
+Exponents, a leading plus, hexadecimal notation, and digit separators are not
+supported yet.
 
 Defaults apply when a column is omitted on insert, not when an explicit null is
 supplied. An explicit null must satisfy the column's nullability.
@@ -358,7 +395,7 @@ than promising rejection of null input on these auto-generated keys. PK+FK table
 using `WITHOUT ROWID` do not have this exception.
 
 ```text
-nickname text?(null)
+nickname str?(null)
 ```
 
 Is allowed; a non-nullable field cannot have a null default.
@@ -402,7 +439,7 @@ also specify a default or `#use default`:
 Ordinary strings use single quotes:
 
 ```text
-title text('Untitled')
+title str('Untitled')
 metadata json('{}')
 ```
 
@@ -417,8 +454,8 @@ quotes and backslashes literally.
 ### Raw strings
 
 ```text
-message text(#'She said "it's ready"'#)
-path text(#'C:\books'#)
+message str(#'She said "it's ready"'#)
+path str(#'C:\books'#)
 ```
 
 `#'...'#` uses matching delimiters `#'` and `'#`.
@@ -427,12 +464,29 @@ Contents are literal; quotes and backslashes need no escaping.
 Use more matching hashes if the content contains the closing delimiter:
 
 ```text
-message text(##'This contains '# safely'##)
+message str(##'This contains '# safely'##)
 ```
 
 The opening and closing hash counts must match.
 
-### Multiline raw strings
+### Backtick literals
+
+Backticks contain exact SQL expressions, exact SQL names, or enum text according
+to context. They may use hash delimiters to include embedded backticks:
+
+```text
+#name #`foo`bar`#
+```
+
+Multiple hashes are allowed. Only a backtick followed by exactly the opening
+hash count closes the literal; other hash runs are content. This rule applies in
+all backtick contexts, not only SQL names. Backticks, like strings, must remain
+on one line in the initial parser.
+
+### Deferred multiline raw strings
+
+The following is an aspirational feature, not initial-parser syntax. All ordinary
+and raw strings are initially single-line; multiline support is deferred.
 
 Multiline raw strings use triple single quotes, with the hash-delimited raw-string
 form. The opening and closing delimiter lines contain no content apart from their
@@ -503,7 +557,7 @@ Within a field default, keep the delimiter lines separate from the surrounding
 parentheses:
 
 ```text
-description text(
+description str(
   #'''
     First paragraph.
 
@@ -655,7 +709,7 @@ Equivalent:
 - Table constraints can appear anywhere directly inside the table; placing them
   at the bottom is a style convention.
 
-The trailing `?` in `text?` is nullability, not a constraint marker.
+The trailing `?` in `str?` is nullability, not a constraint marker.
 
 ### DSL expressions
 
@@ -759,7 +813,7 @@ raw SQL is not restricted by the DSL's own-value-only rule.
 ### Native versus tool-generated rules
 
 ```text
-email text? =
+email str? =
   ? unique
   ? ::isEmail
 ```
@@ -780,7 +834,7 @@ A simple heuristic must not be advertised as full email validation.
 ### Constraint names
 
 ```text
-email text =
+email str =
   ? unique {
     #name `uq_reader_email`
   }
@@ -800,7 +854,7 @@ is deferred. Native `unique` emits a uniqueness constraint/index, not a SQL `CHE
 ### Individual fields
 
 ```text
-email text =
+email str =
   ? unique
 ```
 
@@ -808,8 +862,8 @@ email text =
 
 ```text
 Reader {
-  country text
-  username text
+  country str
+  username str
 
   ?? unique(country, username)
 }
@@ -823,14 +877,14 @@ The pair is unique; neither field must be unique on its own. Adding a field-leve
 Plain `unique` follows SQLite: multiple nulls are allowed.
 
 ```text
-email text? =
+email str? =
   ? unique
 ```
 
 To allow only one null:
 
 ```text
-email text? =
+email str? =
   ? unique(nulls: equal)
 ```
 
@@ -1045,7 +1099,7 @@ specified.
 ```text
 ~(Author, Book) {
   ~~
-  role text('author')
+  role str('author')
   addedAt datetime(::now)
 }
 ```
@@ -1059,7 +1113,7 @@ Users may write out the keys instead:
 ~(Author, Book) {
   *!authorId Author
   *!bookId Book
-  role text('author')
+  role str('author')
 }
 ```
 
@@ -1077,7 +1131,7 @@ explicit key declarations.
 
 ~Translation(Author, Book) {
   ~~
-  language text
+  language str
 }
 ```
 
@@ -1230,7 +1284,8 @@ status enum(draft) =
 
 - Commas separate values.
 - Multiple `#of` lines accumulate allowed values.
-- Bare values support `_` and `-`.
+- Bare values support `_` and `-`; enum tokens are distinct from declaration
+  identifiers. Their full lexical grammar remains open.
 - Values containing spaces use backticks.
 - Inside `#of`, backticks mean enum text, not SQL.
 
@@ -1248,7 +1303,7 @@ status enum(`in review`) =
   #of draft, `in review`
 ```
 
-Do not require single quotes around enum defaults. Ordinary text defaults still
+Do not require single quotes around enum defaults. Ordinary `str` defaults still
 use string literals.
 
 ### Reusable enums
@@ -1359,7 +1414,7 @@ checks.
 ### Field index
 
 ```text
-title text =
+title str =
   #index
 ```
 
@@ -1382,14 +1437,13 @@ The listed order is the indexed column order.
 At field scope:
 
 ```text
-title text =
+title str =
   #index {
     #name `idx_book_title`
   }
 ```
 
-v1 option scopes require braces. No `as` naming or indentation-based `#index =`
-form is supported.
+Index option scopes require braces. No `as` naming or `#index =` form is supported.
 
 ### Partial indexes
 
@@ -1466,13 +1520,13 @@ Event {
 ```
 
 `eventTimezone` is a **DSL field name**, not a timezone value. If absent, generate
-one shared non-null `text` field defaulting to `'UTC'`. Both datetimes link to it.
+one shared non-null `str` field defaulting to `'UTC'`. Both datetimes link to it.
 
 Users can explicitly declare the field:
 
 ```text
 Event {
-  eventTimezone text('Europe/Berlin') =
+  eventTimezone str('Europe/Berlin') =
     #name `event_timezone`
 
   startsAt datetime =
@@ -1492,7 +1546,7 @@ stores UTC datetimes; applications handle conversion. Do not promise SQLite-side
 validation against the full IANA database.
 
 **Open detail:** the exact compatibility rules for explicitly declared timezone
-fields, including nullable fields and constrained text aliases, need finalization.
+fields, including nullable fields and constrained `str` aliases, need finalization.
 
 ### Automatic update timestamps
 
@@ -1616,7 +1670,13 @@ settle duplicate-key rejection for JSON supplied as a v1 string literal; SQLite'
 | `_` at table scope | Error |
 | Unsupported generated constraint/runtime UDF dependency | Error |
 | Structured JSON default or stored array type | Unsupported in v1 |
-| `#index =` or `as` naming | Unsupported in v1 |
+| `as` naming | Unsupported |
+| Mixed `=`/braced body or truly empty `=` body | Parse error |
+| Direct `=` body items not exactly two spaces beyond the declaration, or mismatched siblings | Parse error |
+| `=` body on index or constraint options | Parse error; braces required |
+| Semicolon separators or leading indentation tabs outside literals | Parse error |
+| Unattached docs or docs targeting directives/constraints | Parse error |
+| Multiline strings/backticks | Unsupported in the initial parser |
 
 Raw SQL is an intentional escape hatch. Static validation may not detect every
 SQLite error; SQLite remains the authority on its syntax and enforcement rules.
@@ -1631,17 +1691,21 @@ and fail-before-write behavior.
 ### Current supported-subset resolver
 
 `src/resolver.zig` resolves manually constructed `parsed.Schema` values; no parser
-is implemented. It supports tables, stored fields, `int`/`real`/`text`/`blob`,
+is implemented. It still uses the historical `text` spelling, not the settled
+`str` built-in, and must be updated; this is not a language alias. It supports
+tables, stored fields, `int`/`real`/`text`/`blob`,
 nullability, defaults, primary keys, `#name`, and field-level `#allow reuse`.
 Unknown type names are errors; reusable type declarations are not modeled yet.
 Literal integer defaults also fit `real`; other literal kinds must match their
 storage type. Raw SQL defaults are trusted, not SQL-syntax-validated.
 
-Ordinary strings use quote doubling with literal backslashes. Single-line
-hash-delimited raw strings preserve content literally. Multiline strings are
-explicitly rejected until the remaining multiline rules are settled. Backtick
-arguments must have exactly one opening and closing delimiter; embedded backticks
-are rejected rather than assigned an invented escape convention.
+This is a historical description of the current resolver, not an implementation
+of the newly settled parser syntax. Ordinary strings use quote doubling with
+literal backslashes. Single-line hash-delimited raw strings preserve content
+literally. Multiline strings are explicitly rejected. Backtick arguments currently
+must have exactly one opening and closing delimiter; embedded backticks are
+rejected. The parser plan requires updates to support hash-delimited backticks
+and the other settled lexical and body rules in this document.
 
 The API is `resolve(allocator, parsed_schema) -> Allocator.Error!Result`.
 `Result.diagnostic` contains the first semantic error category, source span, and
@@ -1665,10 +1729,10 @@ semantic diagnostics. Resolution never emits partial SQL.
 --- An author and their public identity.
 Author {
   !id int
-  name text =
+  name str =
     ? ::notEmpty
 
-  email text? =
+  email str? =
     ? unique
 
   *profile Profile? =
@@ -1680,14 +1744,14 @@ Author {
 
 Profile {
   !id int
-  displayName text
+  displayName str
   birthDate date?
   ~author Author? @Author.profile
 }
 
 Publisher {
   !id int
-  name text
+  name str
   ~books Book[] @Book.publisher
 }
 
@@ -1697,7 +1761,7 @@ Book {
 
   !id int
 
-  title text =
+  title str =
     ? ::notEmpty
     #index
 
@@ -1744,18 +1808,18 @@ Book {
   position int(0) =
     ? _ >= 0
 
-  creditedAs text?
+  creditedAs str?
   addedAt datetime(::now)
 }
 
 ~Translation(translator Author, publication Book) {
   ~~
-  language text
+  language str
 }
 
 Category {
   !id int
-  name text
+  name str
   *parent Category?
   ~children Category[] @Category.parent
   ~books Book[] @.categoryId
@@ -1769,12 +1833,12 @@ Category {
 Reader {
   !id int
 
-  username text =
+  username str =
     ? unique {
       #name `uq_reader_username`
     }
 
-  email text?
+  email str?
   deletedAt datetime?
 
   ~settings ReaderSettings? @ReaderSettings.reader
@@ -1804,7 +1868,7 @@ Review {
   *reader Reader
   *book Book
   rating Rating
-  body text
+  body str
   createdAt datetime(::now)
 
   ?? unique(reader, book)
@@ -1819,9 +1883,9 @@ Review {
 
 Event {
   !id int
-  title text
+  title str
 
-  eventTimezone text('UTC')
+  eventTimezone str('UTC')
 
   startsAt datetime =
     #tz eventTimezone
@@ -1848,17 +1912,33 @@ validation, Unicode collation, timezone conversion, or automatic query loading.
 
 ### Parsing and scopes
 
-- Nested indentation bodies inside braced tables.
-- A nullable type `text?` followed by a body containing `?` checks.
+- `=` bodies inside braced tables: direct items exactly two spaces beyond the
+  declaration's actual indentation, including unusually indented declarations.
+- Matching sibling indentation; rejected shallower or deeper direct items;
+  deeper indentation only inside nested braced options with independent formatting.
+- Blank lines and ordinary comments at varying indentation neither establish nor
+  end `=` scope; dedented declarations and enclosing closing braces end it.
+- Correctly indented comment-only `-- TODO` bodies versus truly empty `=` bodies.
+- Rejected mixed `=`/braced bodies and `=` bodies on index/constraint options.
+- Table opening braces on the header line, closing braces on their own line, and
+  empty `{}`; rejected semicolons and leading indentation tabs.
+- Parenthesized multiline expressions versus rejected bare continuations.
+- Standalone consecutive docs, newline joining, optional-space stripping,
+  ordinary-comment preservation, blank-line breaks, invalid targets, and orphans.
+- ASCII identifiers, reserved `_`/`true`/`false`/`null`, and contextual keywords.
+- Decimal negatives and leading zeros; rejected `.5`, `1.`, exponents, plus,
+  hexadecimal numbers, and digit separators.
+- A nullable type `str?` followed by a body containing `?` checks.
 - `??` recognized as a table marker, not two nullable/check tokens.
 - `<`, `<=`, and `<<` tokenization in their respective contexts.
 - Comments immediately after enum values and normal declarations.
 - Raw strings containing quotes, backslashes, comment prefixes, and delimiters.
 - Multi-hash raw strings and mismatched hash counts.
-- Multiline delimiter lines with accidental trailing content.
-- Dedent preserving relative spaces and blank lines.
-- `|`/`>` stripping only leading indentation and the first marker.
-- Contextual backticks: SQL expression, SQL name, and enum text are distinct uses.
+- Hash-delimited backticks with embedded backticks and exact-count closing runs
+  in SQL expression, SQL name, and enum text contexts.
+- Rejected multiline strings/backticks in the initial parser.
+- Deferred multiline feature tests: delimiter-only lines, dedent preserving
+  relative spaces and blank lines, and `|`/`>` stripping only the first marker.
 
 ### Names and references
 
@@ -1913,27 +1993,27 @@ validation, Unicode collation, timezone conversion, or automatic query loading.
 
 These are not new agreed requirements; they are gaps worth resolving explicitly.
 
-1. Remaining delimiter/content grammar, including embedded backticks and multiline
-   edge cases. Ordinary-string quote doubling and literal backslashes are settled.
-2. Indentation/tabs, statement separators, and expression continuation grammar.
-3. Generated key/index/trigger naming. Ordinary camelCase/acronym conversion is
+1. Deferred multiline-string edge cases: blank markers, dedent tabs, and line
+   endings. Single-line strings, quote doubling, literal backslashes, and
+   hash-delimited backticks are settled.
+2. Generated key/index/trigger naming. Ordinary camelCase/acronym conversion is
    settled in section 5.
-4. Canonical generated key ordering for order-independent unnamed connections.
-5. Full validator catalog for `::`, especially email and nonempty-string semantics.
-6. Exact date/datetime format, precision, calendar validity checks, and accepted range.
-7. Nullable/constrained explicit timezone-field compatibility.
-8. Enum duplicate/empty-value rules and enum-literal syntax inside DSL expressions.
-9. Composite uniqueness with nulls-equal semantics and naming of expanded objects.
-10. Trigger SQL, no-op-update behavior, recursion safety, and row targeting.
-11. Constraint restrictions in reusable types: value checks versus structural rules
+3. Canonical generated key ordering for order-independent unnamed connections.
+4. Full validator catalog for `::`, especially email and nonempty-string semantics.
+5. Exact date/datetime format, precision, calendar validity checks, and accepted range.
+6. Nullable/constrained explicit timezone-field compatibility.
+7. Enum duplicate/empty-value rules and enum-literal syntax inside DSL expressions.
+8. Composite uniqueness with nulls-equal semantics and naming of expanded objects.
+9. Trigger SQL, no-op-update behavior, recursion safety, and row targeting.
+10. Constraint restrictions in reusable types: value checks versus structural rules
     such as uniqueness or index directives.
-12. Whether aliases of `int` receive exactly the same automatic-PK behavior.
-13. Defaults on PK+FK fields: the no-generation rule is settled, but explicit
+11. Whether aliases of `int` receive exactly the same automatic-PK behavior.
+12. Defaults on PK+FK fields: the no-generation rule is settled, but explicit
     default policy still needs clarification.
-14. Connection-header role rules: mixed named/unnamed endpoints, duplicate role
+13. Connection-header role rules: mixed named/unnamed endpoints, duplicate role
     names, and general headers with non-`id` target keys.
-15. How to name a primary-key constraint without introducing a conflicting scope.
-16. Generated SQL ordering, validation strategy, and compiler output/error contract.
+14. How to name a primary-key constraint without introducing a conflicting scope.
+15. Generated SQL ordering, validation strategy, and compiler output/error contract.
 
 ## 24. Deferred beyond v1
 
@@ -1942,10 +2022,10 @@ These are not new agreed requirements; they are gaps worth resolving explicitly.
 - Older SQLite compatibility modes.
 - Composite foreign keys and their explicit local/target mapping syntax.
 - Structured JSON literal parsing and its duplicate-key checks.
-- Stored scalar arrays such as `text[]`.
+- Stored scalar arrays such as `str[]`.
 - Query generation, eager loading, ORM/runtime helpers, or collection behavior.
 - Application-side constraint fallback or custom runtime SQLite UDF requirements.
-- `as` naming syntax and indentation-based index option bodies.
+- `as` naming syntax and non-braced index/constraint option bodies.
 - Automatic enforcement that every target has a reverse one-to-one row.
 
 Role-named, self, and multi-endpoint connections are **not** deferred beyond v1;
