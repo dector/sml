@@ -5,6 +5,8 @@
 //! be arena-owned to join source lines. Spans are zero-based, end-exclusive.
 const std = @import("std");
 
+pub const Expression = @import("parsed_expression.zig").Expression;
+
 pub const Span = struct {
     start: usize,
     end: usize,

@@ -1,5 +1,7 @@
 //! Resolved schema model: the boundary between semantic resolution and SQL generation.
 
+pub const Expression = @import("resolved_expression.zig").Expression;
+
 pub const Documentation = struct {
     text: []const u8,
     span: @import("parsed.zig").Span,

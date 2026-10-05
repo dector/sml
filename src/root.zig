@@ -8,6 +8,8 @@ pub const parser = @import("parser.zig");
 test {
     _ = parsed;
     _ = resolved;
+    _ = @import("model/parsed_expression.zig");
+    _ = @import("model/resolved_expression.zig");
     _ = emitter;
     _ = resolver;
     _ = tokenizer;
