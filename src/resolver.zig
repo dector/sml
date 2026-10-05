@@ -236,10 +236,18 @@ const Context = struct {
             if (text.len < 2 * hashes + 2 or text[hashes] != '\'' or
                 text[text.len - hashes - 1] != '\'' or !std.mem.eql(u8, text[0..hashes], text[text.len - hashes ..]))
                 return self.fail(.invalid_literal, token.span, "raw string requires matching hash delimiters");
-            const content = text[hashes + 1 .. text.len - hashes - 1];
-            if (std.mem.indexOf(u8, content, text[text.len - hashes - 1 ..]) != null)
-                return self.fail(.invalid_literal, token.span, "raw string contains its closing delimiter");
-            return self.allocator.dupe(u8, content);
+            const content_end = text.len - hashes - 1;
+            var i = hashes + 1;
+            while (i < text.len) : (i += 1) {
+                if (text[i] != '\'') continue;
+                var end = i + 1;
+                while (end < text.len and text[end] == '#') : (end += 1) {}
+                if (end - i - 1 != hashes) continue;
+                if (i != content_end or end != text.len)
+                    return self.fail(.invalid_literal, token.span, "raw string contains its closing delimiter");
+                return self.allocator.dupe(u8, text[hashes + 1 .. i]);
+            }
+            return self.fail(.invalid_literal, token.span, "raw string requires matching hash delimiters");
         }
         if (text.len < 2 or text[0] != '\'' or text[text.len - 1] != '\'')
             return self.fail(.invalid_literal, token.span, "text requires single-quote or hash delimiters");

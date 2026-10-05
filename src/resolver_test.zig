@@ -263,6 +263,19 @@ test "hash backticks preserve content and require exact closing hash counts" {
     }
 }
 
+test "raw strings close only at the exact matching hash count" {
+    var f = field("value", "str");
+    f.default = .{ .text = token("##'x'###z'#y'##") };
+    var result = try resolver.resolve(std.testing.allocator, .{ .tables = &.{table("T", &.{f})} });
+    try std.testing.expect(result == .schema);
+    defer result.schema.deinit();
+    try std.testing.expectEqualStrings("x'###z'#y", result.schema.schema.tables[0].columns[0].default.?.text);
+    for ([_][]const u8{ "##'early'##tail'##", "##'unmatched'###" }) |literal| {
+        f.default = .{ .text = token(literal) };
+        try expectDiagnostic(.{ .tables = &.{table("T", &.{f})} }, .invalid_literal, span);
+    }
+}
+
 test "documentation is owned with source spans and emitted as safe SQL comments" {
     var source = [_]u8{ 'D', 'o', 'c', 's' };
     var f = field("value", "str");
