@@ -35,8 +35,10 @@ such as `str`, `unique`, and `now` are references here. The result is an owned
 `.expression` or a `.diagnostic`; call `result.expression.deinit()` on success
 and keep the source alive because token text borrows it. Surrounding blank lines
 and ordinary comments are allowed, but docs and trailing expressions are not.
-Dotted names, hyphenated enum references, parentheses, and operators are not yet
-supported. References are not resolved, reusable types remain unsupported, and
+Parentheses may nest up to 256 levels and allow physical newlines and ordinary
+comments inside; indentation there is only formatting (leading tabs still fail).
+Bare line continuations, dotted names, hyphenated enum references, and operators
+are not supported. References are not resolved, reusable types remain unsupported, and
 this API does not extend schema defaults or constraints.
 
 ## Development
