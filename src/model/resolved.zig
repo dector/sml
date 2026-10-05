@@ -63,6 +63,7 @@ pub const Index = struct {
     columns: []const usize,
     sql_name: []const u8,
     unique: bool = false,
+    predicate: ?Expression = null,
 };
 
 pub const UniqueConstraint = struct {

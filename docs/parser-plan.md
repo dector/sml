@@ -2,7 +2,7 @@
 
 Status: the first supported parser milestone (stages 1–4) is implemented and
 covered by tokenizer, parser, allocation-failure, and source-to-SQL tests.
-Stage 5 is partially implemented through Slice17 unique indexes.
+Stage 5 is partially implemented through Slice18 partial indexes.
 `? unique` / `#check unique` preserve a native_unique payload with empty field
 references and ordered, spanned options. Same-line brace options support exact
 backtick #name only; duplicates are preserved for resolver diagnostics.
@@ -33,8 +33,17 @@ No suffixing: repeated column lists need distinct explicit names, including
 ordinary/unique indexes on the same columns (both still default to `_idx`).
 Repeated columns fail. Native UNIQUE labels remain table-local and separate. Whole-schema
 preflight validates manual resolved input before writing all tables then indexes.
-`unique(nulls: equal)`, named checks, index `#where`, and expression
-indexes remain deferred. Unsupported syntax is diagnosed rather than ignored.
+Slice18 adds spanned, duplicate-preserving `#where expr` options using the shared
+expression stream parser, including grouped multiline expressions. Predicates
+resolveInto the parent arena after all columns, in table row scope even for
+field indexes: DSL names map to final SQL names; `_` is invalid. Boolean roots
+or trusted raw SQL are required. Whole-schema expression preflight precedes any
+output. WHERE follows the quoted indexed columns; combined #unique applies only
+to matching rows without rewriting native uniqueness or distinct NULL behavior.
+SQLite disallows nondeterministic functions, subqueries and bound parameters;
+trusted raw SQL restrictions are not statically evaluated.
+`unique(nulls: equal)`, named checks, and expression-index columns
+remain deferred; expression-index grammar is unsettled. Unsupported syntax is diagnosed rather than ignored.
 See [the language design](design-v1.md) for broader v1 scope.
 
 ## Goal and first milestone
@@ -130,7 +139,7 @@ unknown field references still fail resolution. Tests: `src/table_check_test.zig
 `table_checks.pzl`/SQL fixture, and `src/testdata/table_check_runtime_test.py`
 (INSERT and UPDATE enforcement). Field-check coverage remains intact.
 
-Other generators, date/JSON, partial/expression indexes, FKs, relationships, and
+Other generators, date/JSON, expression indexes, FKs, relationships, and
 connections come in later slices. Reusable types are deferred indefinitely.
 Numeric exponent notation and multiline literals are deferred.
 
@@ -343,9 +352,9 @@ Extend syntax models, parser, resolver, emitter, and tests together:
 
 1. Additional defaults and date/JSON types. Inline enums are complete;
    reusable types remain deferred indefinitely.
-2. Nulls-equal, named check bodies, and partial indexes (ordinary/unique indexes,
+2. Nulls-equal and named check bodies (ordinary/unique/partial indexes,
    composite uniqueness, expression precedence, field checks, and table checks
-   are implemented; expression indexes are not supported).
+   are implemented; expression-index columns remain deferred pending grammar).
 3. Stored FKs and virtual relationships.
 4. Named/unnamed connections, roles, generated keys, and destination hints.
 5. Remaining directives and multiline literals after their rules are finalized.

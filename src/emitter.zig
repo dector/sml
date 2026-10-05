@@ -22,6 +22,10 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
             if (std.ascii.eqlIgnoreCase(table.sql_name, prior.sql_name)) return error.SqlNameCollision;
         }
         for (table.indexes, 0..) |index, n| {
+            if (index.predicate) |predicate| {
+                try expression_emitter.preflight(predicate);
+                if (@import("expression_resolver.zig").validateCheckResult(&predicate) != null) return error.InvalidIndex;
+            }
             if (index.sql_name.len == 0 or std.mem.indexOfScalar(u8, index.sql_name, 0) != null) return error.InvalidIdentifier;
             if (std.ascii.startsWithIgnoreCase(index.sql_name, "sqlite_") or index.columns.len == 0) return error.InvalidIndex;
             for (index.columns, 0..) |column, k| {
@@ -217,7 +221,12 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
             if (n != 0) try writer.writeAll(", ");
             try writeIdentifier(writer, table.columns[column].sql_name);
         }
-        try writer.writeAll(");\n");
+        try writer.writeByte(')');
+        if (index.predicate) |predicate| {
+            try writer.writeAll(" WHERE ");
+            try expression_emitter.emit(predicate, writer);
+        }
+        try writer.writeAll(";\n");
     };
 }
 

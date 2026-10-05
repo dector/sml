@@ -71,7 +71,17 @@ are ordinary. Duplicate flags are diagnosed; arguments and bodies are rejected.
 Nested braced indexes work inside `=` field bodies; brace indentation is free,
 but following siblings must return to exactly declaration indentation + 2.
 Docs cannot target indexes or their options. Standalone `#unique`, `#where`,
-and expression indexes are unsupported. Unique indexes use SQLite's distinct
+and expression-index columns are unsupported (their grammar remains unsettled).
+Slice18 adds `#where expr` inside field/table index braces. It uses the shared
+expression parser, including grouped multiline expressions. Predicates resolve
+in table row scope: DSL field names (including forward references and `#name`
+mapping) work; `_` is invalid even for field indexes. The root must be Boolean
+or trusted raw SQL. Duplicate `#where` is diagnosed. SQL emits WHERE after the
+quoted column list; all predicate trees are preflighted before any schema output.
+SQLite restrictions apply: no nondeterministic functions, subqueries, or bound
+variables. Trusted raw SQL is not statically checked for those restrictions.
+With `#unique`, only predicate-matching rows participate in uniqueness; no
+constraint rewrite occurs. Unique indexes use SQLite's distinct
 NULL semantics, like native `? unique` constraints. Default names are
 `{table_sql_name}_{column_sql_names_joined_by_underscore}_idx`.
 Names are safely quoted, nonempty and NUL-free. Index names must be distinct

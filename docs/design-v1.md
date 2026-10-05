@@ -1522,8 +1522,8 @@ title str =
 ```
 
 Index option scopes require braces, opened on the directive line. Empty `{}`
-is allowed; nonempty bodies close on their own line. Only exact backtick or
-hash-delimited backtick `#name` is supported. Duplicate options are preserved
+is allowed; nonempty bodies close on their own line. Options accept exact backtick
+or hash-delimited backtick `#name`, argument-free `#unique`, and `#where expr`. Duplicate options are preserved
 in syntax and rejected in resolution. Documentation cannot target directives
 or options. No `as` naming or `#index =` form is supported. Nested braces inside
 `=` field bodies have independent indentation; following siblings return to
@@ -1531,7 +1531,7 @@ exactly declaration indentation + 2. The resolved table owns index column
 indices and SQL names. Emission preflights all names, columns, and collisions
 before writing, then emits CREATE INDEX after all CREATE TABLE statements.
 
-### Partial indexes (deferred; unsupported in Slice16)
+### Partial indexes (implemented in Slice18)
 
 ```text
 #index title {
@@ -1546,10 +1546,18 @@ before writing, then emits CREATE INDEX after all CREATE TABLE statements.
 #where `deleted_at IS NULL`
 ```
 
-SQLite's own partial-index restrictions still apply. For example, predicates
-cannot depend on subqueries or nondeterministic functions.
+Predicates use the shared expression parser, including grouped multiline forms.
+They resolve after all columns in table row scope, even for field indexes: DSL
+names map to actual SQL `#name` values and forward references work. `_` is invalid.
+The root must be Boolean or trusted raw SQL. Duplicate #where is diagnosed.
+The resolved predicate tree is owned by the schema arena. Expression preflight
+for the entire schema runs before any output; WHERE follows quoted columns.
+SQLite's own partial-index restrictions still apply: no subqueries,
+nondeterministic functions, or bound variables. Raw SQL is trusted; these
+restrictions are not statically evaluated. Expression-index columns remain
+explicitly deferred because their grammar is unsettled.
 
-### Unique partial indexes (deferred; unsupported in Slice16)
+### Unique partial indexes (implemented in Slice18)
 
 ```text
 #index email {
@@ -1562,8 +1570,10 @@ Only indexed rows participate in uniqueness. This can enforce unique emails amon
 active rows while permitting duplicates among deleted rows.
 
 `#index` is separate from `#check`: indexes are not validation checks. `#unique`
-is a future index option; both `#unique` and `#where` are explicitly unsupported
-in Slice16. Native `? unique` remains available for ordinary uniqueness.
+and `#where` are supported index options. Combining them does not rewrite
+constraints. Native `? unique` is unchanged, and uniqueness still permits
+multiple NULLs. Ordinary/partial indexes share generated names; use distinct
+explicit #name options for repeated column lists.
 
 ## 18. Dates, timestamps, and timezones
 

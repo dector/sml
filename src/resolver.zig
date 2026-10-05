@@ -85,6 +85,7 @@ const Context = struct {
             .check => {},
             .native_unique, .index => {},
             .unique => return self.fail(.invalid_directive_scope, directive.span, "#unique is index-option-only"),
+            .where => return self.fail(.invalid_directive_scope, directive.span, "#where is index-option-only"),
             .of => {
                 if (table) return self.fail(.invalid_directive_scope, directive.span, "#of is field-only");
             },
@@ -325,6 +326,7 @@ const Context = struct {
         }
         var override: ?parsed.Token = null;
         var unique = false;
+        var predicate: ?resolved.Expression = null;
         for (payload.options) |option| switch (option.kind) {
             .name => |exact| {
                 if (override != null) return self.fail(.duplicate_directive, option.span, "duplicate #name in index options");
@@ -334,7 +336,17 @@ const Context = struct {
                 if (unique) return self.fail(.duplicate_directive, option.span, "duplicate #unique in index options");
                 unique = true;
             },
-            else => return self.fail(.invalid_index, option.span, "Only #name and #unique are supported in index options"),
+            .where => |input| {
+                if (predicate != null) return self.fail(.duplicate_directive, option.span, "duplicate #where in index options");
+                const result = try expression_resolver.resolveInto(self.allocator, input, .{ .table = table });
+                predicate = switch (result) {
+                    .expression => |expression| expression,
+                    .diagnostic => |d| return self.fail(.invalid_index, d.span, d.message),
+                };
+                if (expression_resolver.validateCheckResult(&predicate.?)) |d|
+                    return self.fail(.invalid_index, d.span, "Index predicate must be Boolean or trusted raw SQL");
+            },
+            else => return self.fail(.invalid_index, option.span, "Only #name, #unique and #where are supported in index options"),
         };
         var generated: std.ArrayList(u8) = .empty;
         try generated.appendSlice(self.allocator, table.sql_name);
@@ -345,7 +357,7 @@ const Context = struct {
         try generated.appendSlice(self.allocator, "_idx");
         const sql_name = if (override) |exact| try self.name(.{ .text = "", .span = directive.span }, exact) else try generated.toOwnedSlice(self.allocator);
         if (std.ascii.startsWithIgnoreCase(sql_name, "sqlite_")) return self.fail(.invalid_identifier, if (override) |o| o.span else directive.span, "Index names beginning sqlite_ are reserved");
-        return .{ .columns = columns, .sql_name = sql_name, .unique = unique };
+        return .{ .columns = columns, .sql_name = sql_name, .unique = unique, .predicate = predicate };
     }
 
     fn documentation(self: *Context, docs: ?parsed.Documentation) Error!?resolved.Documentation {

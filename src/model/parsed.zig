@@ -120,6 +120,8 @@ pub const Directive = struct {
         allow_reuse,
         /// Field `? expr`, table `?? expr`, or either scope's `#check expr`.
         check: Expression,
+        /// Row predicate, valid only inside index options.
+        where: Expression,
         /// Contextual enum values; keep spelling and source order.
         of: []const Token,
     },

@@ -161,7 +161,7 @@ test "invalid index syntax, docs and unsupported options" {
         "T {\n#unique\na int\n}\n",
         "T {\na int {\n#unique\n}\n}\n",
         "T {\na int {\n? unique {\n#unique\n}\n}\n}\n",
-        "T {\n#index a {\n#where a > 0\n}\n}\n",
+        "T {\n#index a {\n#where\n}\n}\n",
         "T {\n#index a { #name `n` }\n}\n",
         "T {\na int =\n  #index {\n#name `n`\n}\n   #name `a`\n}\n",
         "T {\n#index a {\n#name `n` }\n}\n",
@@ -201,7 +201,8 @@ test "index semantic failures, exact and generated global collisions including l
     var syntax = try parser.parse(std.testing.allocator, duplicate);
     defer syntax.schema.deinit();
     try std.testing.expectEqual(@as(usize, 2), syntax.schema.schema.tables[0].directives[0].kind.index.options.len);
-    try std.testing.checkAllAllocationFailures(std.testing.allocator, semanticFailure, .{duplicate});
+    var backing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .resize_fail_index = 0 });
+    try std.testing.checkAllAllocationFailures(backing.allocator(), semanticFailure, .{duplicate});
 }
 
 test "manual global index collisions and invalid later columns write nothing" {
