@@ -1,7 +1,8 @@
-//! Literal, reference, grouping, and unary logical-not expression parsing. Token text borrows source, which must
+//! Literal, reference, grouping, unary logical-not, and comparison expression parsing. Token text borrows source, which must
 //! outlive the result. Numeric conversion and literal decoding belong to resolution.
 const std = @import("std");
 const parsed = @import("model/parsed.zig");
+const BinaryOperator = @import("model/parsed_expression.zig").BinaryOperator;
 const tokenizer = @import("tokenizer.zig");
 
 pub const OwnedExpression = struct {
@@ -22,8 +23,8 @@ pub const Result = union(enum) {
 /// Parses exactly one expression, allowing newlines/comments inside parentheses
 /// and surrounding blank lines/comments, but never docs or bare continuations.
 /// No partial result escapes on syntax errors or allocation failure.
-/// Leaves borrow source text; grouping and unary children belong to the result's arena.
-/// Recursive nesting is limited to max_nesting, shared by grouping and unary chains.
+/// Leaves borrow source text; all children belong to the result's arena.
+/// Recursive nesting and total structural depth are both limited to max_nesting.
 pub fn parse(allocator: std.mem.Allocator, source: []const u8) std.mem.Allocator.Error!Result {
     var arena = std.heap.ArenaAllocator.init(allocator);
     errdefer arena.deinit();
@@ -39,7 +40,8 @@ pub fn parse(allocator: std.mem.Allocator, source: []const u8) std.mem.Allocator
     return .{ .expression = .{ .expression = expression, .arena = arena } };
 }
 
-/// Maximum recursive expression nesting, shared by grouping and unary operators.
+/// Maximum recursive nesting and structural AST depth (edges to the deepest leaf).
+/// Grouping, unary, and binary nodes all consume the same structural budget.
 pub const max_nesting = 256;
 
 /// Reusable stream parser. Supply `current` from `lexer.next()`; the lexer must
@@ -70,7 +72,49 @@ pub const Parser = struct {
         }
     }
 
+    const Node = struct { expression: parsed.Expression, height: usize = 0 };
+
     pub fn parseExpression(self: *Parser) Error!parsed.Expression {
+        return (try self.comparison()).expression;
+    }
+
+    fn structuralDepth(self: *Parser, height: usize, span: parsed.Span) Error!void {
+        if (height > max_nesting)
+            return self.fail(span, "Expression structural depth exceeds maximum of 256");
+    }
+
+    // One precedence level; mixed comparison chains associate left.
+    fn comparison(self: *Parser) Error!Node {
+        var left = try self.unary();
+        while (true) {
+            if (self.paren_depth > 0) try self.trivia();
+            const operator: BinaryOperator = switch (self.current.kind) {
+                .equal_equal => .equal,
+                .not_equal => .not_equal,
+                .less_than => .less_than,
+                .less_than_or_equal => .less_than_or_equal,
+                .greater_than => .greater_than,
+                .greater_than_or_equal => .greater_than_or_equal,
+                else => return left,
+            };
+            const operator_span = self.current.span;
+            try self.advance();
+            if (self.paren_depth > 0) try self.trivia();
+            const right = try self.unary();
+            const height = @max(left.height, right.height) + 1;
+            try self.structuralDepth(height, operator_span);
+            const lhs = try self.allocator.create(parsed.Expression);
+            lhs.* = left.expression;
+            const rhs = try self.allocator.create(parsed.Expression);
+            rhs.* = right.expression;
+            left = .{ .expression = .{
+                .kind = .{ .binary = .{ .operator = operator, .operator_span = operator_span, .left = lhs, .right = rhs } },
+                .span = .{ .start = lhs.span.start, .end = rhs.span.end },
+            }, .height = height };
+        }
+    }
+
+    fn unary(self: *Parser) Error!Node {
         // All grouping and unary operands recurse through this bounded entry point.
         // The root is depth zero; 256 nested constructs plus their leaf are valid.
         if (self.depth > max_nesting)
@@ -99,24 +143,25 @@ pub const Parser = struct {
             else => return self.fail(value.span, "Expected a literal or reference expression"),
         };
         try self.advance();
-        return .{ .kind = kind, .span = value.span };
+        return .{ .expression = .{ .kind = kind, .span = value.span } };
     }
 
     // Unary ! binds to the next unary or primary expression (highest precedence).
-    fn logicalNot(self: *Parser) Error!parsed.Expression {
+    fn logicalNot(self: *Parser) Error!Node {
         const start = self.current.span.start;
         try self.advance();
         if (self.paren_depth > 0) try self.trivia();
-        const operand = try self.parseExpression();
+        const operand = try self.unary();
+        try self.structuralDepth(operand.height + 1, .{ .start = start, .end = start + 1 });
         const child = try self.allocator.create(parsed.Expression);
-        child.* = operand;
-        return .{
+        child.* = operand.expression;
+        return .{ .expression = .{
             .kind = .{ .unary = .{ .operator = .logical_not, .operand = child } },
-            .span = .{ .start = start, .end = operand.span.end },
-        };
+            .span = .{ .start = start, .end = child.span.end },
+        }, .height = operand.height + 1 };
     }
 
-    fn grouping(self: *Parser) Error!parsed.Expression {
+    fn grouping(self: *Parser) Error!Node {
         self.paren_depth += 1;
         defer self.paren_depth -= 1;
         const start = self.current.span.start;
@@ -126,15 +171,16 @@ pub const Parser = struct {
             return self.fail(self.current.span, "Empty parenthesized expression");
         if (self.current.kind == .eof)
             return self.fail(self.current.span, "Unclosed parenthesized expression; expected ')'");
-        const expression = try self.parseExpression();
+        const expression = try self.comparison();
         try self.trivia();
         if (self.current.kind != .r_paren)
             return self.fail(self.current.span, "Expected ')' after parenthesized expression");
         const end = self.current.span.end;
         try self.advance();
         const child = try self.allocator.create(parsed.Expression);
-        child.* = expression;
-        return .{ .kind = .{ .grouping = child }, .span = .{ .start = start, .end = end } };
+        try self.structuralDepth(expression.height + 1, .{ .start = start, .end = start + 1 });
+        child.* = expression.expression;
+        return .{ .expression = .{ .kind = .{ .grouping = child }, .span = .{ .start = start, .end = end } }, .height = expression.height + 1 };
     }
 
     fn trivia(self: *Parser) Error!void {
@@ -248,7 +294,7 @@ test "reject empty, incomplete, unsupported and trailing syntax" {
         "",            " \n-- comment",   "--- docs\n1", "1\n--- docs",     "1 --- inline",
         "'unfinished", "#'unfinished'##", "`unfinished", "'a\nb'",          "1.",
         "1e3",         "foo.bar",         "in-progress", "(1 2)",           "!\ntrue",
-        "1 = 2",       "1 + 2",           "1 < 2",       "true and false",  "::now",
+        "1 = 2",       "1 + 2",           "1 <",         "true and false",  "::now",
         "#name",       "1 2",             "1\n2",        "1 -- comment\n2", "1\n+ 2",
         "1 }",         "null?",
     };
@@ -418,7 +464,7 @@ test "diagnostics retain original source offsets" {
 }
 
 test "stream parsing preserves next token and original spans" {
-    inline for (.{ "001", "field", "_", "((001))", "(\n  field\n)", "!!_", "!(field)", "(!\n true)" }) |leaf| {
+    inline for (.{ "001", "field", "_", "((001))", "(\n  field\n)", "!!_", "!(field)", "!a >= b", "(a\n<=\nb)", "(!\n true)" }) |leaf| {
         for ([_][]const u8{ "prefix " ++ leaf ++ "\nnext", "prefix " ++ leaf ++ "}" }) |source| {
             var lexer = tokenizer.Tokenizer.init(source);
             _ = lexer.next(); // An enclosing parser already consumed the prefix.
@@ -446,7 +492,7 @@ fn allocationSuccess(backing: std.mem.Allocator) !void {
     var no_resize = std.testing.FailingAllocator.init(backing, .{ .resize_fail_index = 0 });
     const allocator = no_resize.allocator();
     try allocationLeaves(allocator);
-    for ([_][]const u8{ "((001))", "(\n  ( -- comment\n #'borrowed'#)\n)", &nestedSource(max_nesting, "_"), "!!true", "!(!\n -- operand\n field)", &unarySource(max_nesting, "_") }) |source| {
+    for ([_][]const u8{ "((001))", "(\n  ( -- comment\n #'borrowed'#)\n)", &nestedSource(max_nesting, "_"), "!!true", "!(!\n -- operand\n field)", &unarySource(max_nesting, "_"), "!a==b!=c<d<=e>f>=g", "(a\n<=\n!b)", &comparisonSource(max_nesting) }) |source| {
         var result = try parse(allocator, source);
         try std.testing.expect(result == .expression);
         defer result.expression.deinit();
@@ -456,7 +502,7 @@ fn allocationSuccess(backing: std.mem.Allocator) !void {
 fn allocationFailure(backing: std.mem.Allocator) !void {
     var no_resize = std.testing.FailingAllocator.init(backing, .{ .resize_fail_index = 0 });
     const allocator = no_resize.allocator();
-    for ([_][]const u8{ "1 unsupported", "((1)) unsupported", "(((1))", "((1) --- bad", "((1) 'unterminated", "!!true unsupported", "(!!true", "(!true !", "!", "!!", "! 'unterminated" }) |source| {
+    for ([_][]const u8{ "1 unsupported", "((1)) unsupported", "(((1))", "((1) --- bad", "((1) 'unterminated", "!!true unsupported", "(!!true", "(!true !", "!", "!!", "! 'unterminated", "a==", "a!=b<", "(a<=b", "a>=b unsupported", "a==b 'unterminated", &comparisonSource(max_nesting + 1), &nestedSource(1, &comparisonSource(max_nesting)) }) |source| {
         const result = try parse(allocator, source);
         try std.testing.expect(result == .diagnostic);
     }
@@ -472,4 +518,90 @@ test "allocation failure checks cover successful and rejected input" {
     try std.testing.expect(result == .diagnostic);
     try std.testing.expectError(error.OutOfMemory, parse(failing.allocator(), "((1))"));
     try std.testing.expectError(error.OutOfMemory, parse(failing.allocator(), "!true"));
+    try std.testing.expectError(error.OutOfMemory, parse(failing.allocator(), "a==b"));
+}
+
+fn comparisonSource(comptime count: usize) [1 + count * 3]u8 {
+    var source: [1 + count * 3]u8 = undefined;
+    source[0] = 'a';
+    for (0..count) |i| @memcpy(source[1 + i * 3 ..][0..3], "==a");
+    return source;
+}
+
+test "comparisons preserve full operator tokens and arena children" {
+    inline for (.{
+        .{ "==", .equal },       .{ "!=", .not_equal },
+        .{ "<", .less_than },    .{ "<=", .less_than_or_equal },
+        .{ ">", .greater_than }, .{ ">=", .greater_than_or_equal },
+    }) |case| {
+        const source = "  !a " ++ case[0] ++ " !b ";
+        var result = try parse(std.testing.allocator, source);
+        try std.testing.expect(result == .expression);
+        defer result.expression.deinit();
+        const node = result.expression.expression;
+        const binary = node.kind.binary;
+        try std.testing.expectEqual(@as(BinaryOperator, case[1]), binary.operator);
+        try std.testing.expectEqualDeep(parsed.Span{ .start = 5, .end = 5 + case[0].len }, binary.operator_span);
+        try std.testing.expectEqualStrings(case[0], source[binary.operator_span.start..binary.operator_span.end]);
+        try std.testing.expectEqualDeep(parsed.Span{ .start = 2, .end = source.len - 1 }, node.span);
+        try std.testing.expectEqualStrings("a", binary.left.kind.unary.operand.kind.identifier.text);
+        try std.testing.expectEqualStrings("b", binary.right.kind.unary.operand.kind.identifier.text);
+        try std.testing.expect(binary.left != binary.right);
+    }
+}
+
+test "comparison chains associate left including mixed operators" {
+    var result = try parse(std.testing.allocator, "a < b == c >= d");
+    try std.testing.expect(result == .expression);
+    defer result.expression.deinit();
+    const outer = result.expression.expression.kind.binary;
+    try std.testing.expectEqual(BinaryOperator.greater_than_or_equal, outer.operator);
+    try std.testing.expectEqualStrings("d", outer.right.kind.identifier.text);
+    const middle = outer.left.kind.binary;
+    try std.testing.expectEqual(BinaryOperator.equal, middle.operator);
+    try std.testing.expectEqualStrings("c", middle.right.kind.identifier.text);
+    const inner = middle.left.kind.binary;
+    try std.testing.expectEqual(BinaryOperator.less_than, inner.operator);
+    try std.testing.expectEqualStrings("a", inner.left.kind.identifier.text);
+    try std.testing.expectEqualStrings("b", inner.right.kind.identifier.text);
+    try std.testing.expectEqualDeep(parsed.Span{ .start = 0, .end = 5 }, middle.left.span);
+    var grouped = try parse(std.testing.allocator, "!(a\r\n -- comment\n <=\n !b)");
+    try std.testing.expect(grouped == .expression);
+    defer grouped.expression.deinit();
+    try std.testing.expect(grouped.expression.expression.kind.unary.operand.kind.grouping.kind == .binary);
+}
+
+test "comparison syntax rejects missing operands bare continuations and arithmetic" {
+    for ([_][]const u8{
+        "==a",    "a==",    "a!=",               "a<",                "a<=",   "a>",                 "a>=", "a===b", "a<==b",
+        "a==\nb", "a\n==b", "a -- comment\n==b", "a== -- comment\nb", "(a==)", "(a==\n--- docs\nb)", "a+b", "a*b",   "a/b",
+        "a- b",   "a=b",
+    }) |source| {
+        const result = try parse(std.testing.allocator, source);
+        try std.testing.expect(result == .diagnostic);
+        try std.testing.expect(result.diagnostic.message.len > 0);
+        try std.testing.expect(result.diagnostic.span.end <= source.len);
+    }
+    const result = try parse(std.testing.allocator, "a == >= b");
+    try std.testing.expectEqualDeep(parsed.Span{ .start = 5, .end = 7 }, result.diagnostic.span);
+}
+
+test "structural budget bounds linear chains and combined constructs" {
+    var accepted = try parse(std.testing.allocator, &comparisonSource(max_nesting));
+    try std.testing.expect(accepted == .expression);
+    defer accepted.expression.deinit();
+    var node: *const parsed.Expression = &accepted.expression.expression;
+    for (0..max_nesting) |_| node = node.kind.binary.left;
+    try std.testing.expect(node.kind == .identifier);
+    for ([_][]const u8{
+        &comparisonSource(max_nesting + 1),
+        &comparisonSource(10000),
+        &nestedSource(1, &comparisonSource(max_nesting)),
+        &unarySource(1, &nestedSource(1, &comparisonSource(max_nesting - 1))),
+        &unarySource(max_nesting, "a==b"),
+    }) |source| {
+        const result = try parse(std.testing.allocator, source);
+        try std.testing.expect(result == .diagnostic);
+        try std.testing.expectEqualStrings("Expression structural depth exceeds maximum of 256", result.diagnostic.message);
+    }
 }

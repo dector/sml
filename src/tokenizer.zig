@@ -18,6 +18,12 @@ pub const Kind = enum {
     bang,
     question,
     equal,
+    equal_equal,
+    not_equal,
+    less_than,
+    less_than_or_equal,
+    greater_than,
+    greater_than_or_equal,
     hash,
     comma,
     newline,
@@ -100,6 +106,16 @@ pub const Tokenizer = struct {
             return self.token(.generator, start);
         }
         self.pos += 1;
+        if ((c == '=' or c == '!' or c == '<' or c == '>') and self.pos < self.source.len and self.source[self.pos] == '=') {
+            self.pos += 1;
+            return self.token(switch (c) {
+                '=' => .equal_equal,
+                '!' => .not_equal,
+                '<' => .less_than_or_equal,
+                '>' => .greater_than_or_equal,
+                else => unreachable,
+            }, start);
+        }
         return switch (c) {
             '{' => self.token(.l_brace, start),
             '}' => self.token(.r_brace, start),
@@ -108,6 +124,8 @@ pub const Tokenizer = struct {
             '!' => self.token(.bang, start),
             '?' => self.token(.question, start),
             '=' => self.token(.equal, start),
+            '<' => self.token(.less_than, start),
+            '>' => self.token(.greater_than, start),
             '#' => self.token(.hash, start),
             ',' => self.token(.comma, start),
             '"' => self.fail(start, "double-quoted strings are not supported; use single quotes"),
@@ -223,6 +241,22 @@ test "identifiers, punctuation, indentation, line endings, and repeat EOF" {
     try expectToken(&s, .newline, "\r", 2);
     try expectToken(&s, .eof, "", 0);
     try expectToken(&s, .eof, "", 0);
+}
+
+test "comparison maximal munch preserves schema markers and adjacent boundaries" {
+    var s = Tokenizer.init("a==1!=2<3<=4>5>=6 ! = ? === !== <== >== !!");
+    const kinds = [_]Kind{ .identifier, .equal_equal, .integer, .not_equal, .integer, .less_than, .integer, .less_than_or_equal, .integer, .greater_than, .integer, .greater_than_or_equal, .integer, .bang, .equal, .question, .equal_equal, .equal, .not_equal, .equal, .less_than_or_equal, .equal, .greater_than_or_equal, .equal, .bang, .bang };
+    const texts = [_][]const u8{ "a", "==", "1", "!=", "2", "<", "3", "<=", "4", ">", "5", ">=", "6", "!", "=", "?", "==", "=", "!=", "=", "<=", "=", ">=", "=", "!", "!" };
+    for (kinds, texts) |kind, text| try expectToken(&s, kind, text, 0);
+    try expectToken(&s, .eof, "", 0);
+    var markers = Tokenizer.init("!id int\nvalue str?=\n  #name `v`\n");
+    for ([_]Kind{ .bang, .identifier, .identifier, .newline, .identifier, .identifier, .question, .equal, .newline, .hash, .identifier, .backtick, .newline }, [_][]const u8{ "!", "id", "int", "\n", "value", "str", "?", "=", "\n", "#", "name", "`v`", "\n" }, [_]usize{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2, 2 }) |kind, text, indent| try expectToken(&markers, kind, text, indent);
+    const schema_parser = @import("parser.zig");
+    var result = try schema_parser.parse(std.testing.allocator, "T {\n  !id int\n  value str?=\n    #name `v`\n}");
+    try std.testing.expect(result == .schema);
+    defer result.schema.deinit();
+    try std.testing.expect(result.schema.schema.tables[0].fields[0].primary_key);
+    try std.testing.expect(result.schema.schema.tables[0].fields[1].type.nullable);
 }
 
 test "decimal numbers preserve spelling without converting or overflowing" {

@@ -35,6 +35,8 @@ pub const Expression = struct {
         },
         binary: struct {
             operator: BinaryOperator,
+            /// Exact full operator token, excluding surrounding whitespace.
+            operator_span: parsed.Span,
             left: *const Expression,
             right: *const Expression,
         },
@@ -77,7 +79,7 @@ test "arena expression tree preserves grouping and operator spans" {
     const literal = try allocator.create(Expression);
     literal.* = .{ .kind = .{ .integer = .{ .text = source[7..10], .span = .{ .start = 7, .end = 10 } } }, .span = .{ .start = 7, .end = 10 } };
     const comparison = try allocator.create(Expression);
-    comparison.* = .{ .kind = .{ .binary = .{ .operator = .greater_than_or_equal, .left = current, .right = literal } }, .span = .{ .start = 2, .end = 10 } };
+    comparison.* = .{ .kind = .{ .binary = .{ .operator = .greater_than_or_equal, .operator_span = .{ .start = 4, .end = 6 }, .left = current, .right = literal } }, .span = .{ .start = 2, .end = 10 } };
     const group = try allocator.create(Expression);
     group.* = .{ .kind = .{ .grouping = comparison }, .span = .{ .start = 1, .end = 11 } };
     const node: Expression = .{ .kind = .{ .unary = .{ .operator = .logical_not, .operand = group } }, .span = .{ .start = 0, .end = source.len } };
