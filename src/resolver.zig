@@ -82,9 +82,7 @@ const Context = struct {
                 result.name = token;
             },
             .check => {},
-            .native_unique => {
-                if (table) return self.fail(.invalid_directive_scope, directive.span, "Table composite uniqueness is unsupported; deferred");
-            },
+            .native_unique => {},
             .of => {
                 if (table) return self.fail(.invalid_directive_scope, directive.span, "#of is field-only");
             },
@@ -219,6 +217,41 @@ const Context = struct {
                 };
             }
             tables[i] = .{ .dsl_name = try self.allocator.dupe(u8, table.name.text), .sql_name = sql_name, .columns = columns, .documentation = try self.documentation(table.documentation) };
+            var table_uniques: std.ArrayList(resolved.UniqueConstraint) = .empty;
+            for (table.directives) |directive| {
+                if (directive.kind != .native_unique) continue;
+                const unique = directive.kind.native_unique;
+                if (unique.fields.len == 0) return self.fail(.invalid_unique, directive.span, "Table uniqueness requires a nonempty field list");
+                const indices = try self.allocator.alloc(usize, unique.fields.len);
+                for (unique.fields, 0..) |reference, n| {
+                    const index = for (columns, 0..) |column, k| {
+                        if (std.mem.eql(u8, reference.text, column.dsl_name)) break k;
+                    } else return self.fail(.invalid_unique, reference.span, "Unknown field in unique constraint");
+                    for (indices[0..n]) |prior| if (prior == index)
+                        return self.fail(.invalid_unique, reference.span, "Repeated field in unique constraint");
+                    indices[n] = index;
+                }
+                var constraint_name: ?[]const u8 = null;
+                for (unique.options) |option| {
+                    if (option.kind != .name) return self.fail(.invalid_unique, option.span, "Only #name is supported in unique options");
+                    if (constraint_name != null) return self.fail(.duplicate_directive, option.span, "duplicate #name in unique options");
+                    constraint_name = try self.name(table.name, option.kind.name);
+                }
+                for (columns, 0..) |column, k| for (column.unique_constraints) |prior| {
+                    if (indices.len == 1 and indices[0] == k)
+                        return self.fail(.duplicate_directive, directive.span, "Duplicate uniqueness on the same fields");
+                    if (constraint_name) |n| if (prior.name) |p| if (std.ascii.eqlIgnoreCase(n, p))
+                        return self.fail(.sql_name_collision, directive.span, "Named constraints collide within table (ASCII case-insensitive)");
+                };
+                for (table_uniques.items) |prior| {
+                    if (@import("unique.zig").sameFields(indices, prior.columns))
+                        return self.fail(.duplicate_directive, directive.span, "Duplicate uniqueness on the same fields");
+                    if (constraint_name) |n| if (prior.name) |p| if (std.ascii.eqlIgnoreCase(n, p))
+                        return self.fail(.sql_name_collision, directive.span, "Named constraints collide within table (ASCII case-insensitive)");
+                }
+                try table_uniques.append(self.allocator, .{ .name = constraint_name, .columns = indices });
+            }
+            tables[i].unique_constraints = try table_uniques.toOwnedSlice(self.allocator);
             // Metadata (including final SQL names) must exist before resolving `_`.
             for (table.fields, 0..) |field, j| {
                 var checks: std.ArrayList(resolved.Expression) = .empty;

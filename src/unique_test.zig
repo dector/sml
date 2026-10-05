@@ -26,6 +26,96 @@ fn pipeline(allocator: std.mem.Allocator) !void {
     try std.testing.expectEqualStrings(@embedFile("testdata/parser/unique.expect.sql"), sql.written());
 }
 
+fn compositePipeline(allocator: std.mem.Allocator) !void {
+    const source = try allocator.dupe(u8, @embedFile("testdata/parser/composite_unique.pzl"));
+    defer allocator.free(source);
+    var semantic: resolver.Result = undefined;
+    {
+        var syntax = try parser.parse(allocator, source);
+        try std.testing.expect(syntax == .schema);
+        defer syntax.schema.deinit();
+        const fields = syntax.schema.schema.tables[0].directives[0].kind.native_unique.fields;
+        try std.testing.expectEqualStrings("right", source[fields[0].span.start..fields[0].span.end]);
+        try std.testing.expectEqualStrings("left", fields[1].text);
+        semantic = try resolver.resolve(allocator, syntax.schema.schema);
+    }
+    try std.testing.expect(semantic == .schema);
+    defer semantic.schema.deinit();
+    @memset(source, 'x');
+    const table = semantic.schema.schema.tables[0];
+    try std.testing.expectEqualSlices(usize, &.{ 3, 2 }, table.unique_constraints[0].columns);
+    var sql = std.Io.Writer.Allocating.init(allocator);
+    defer sql.deinit();
+    emitter.emit(semantic.schema.schema, &sql.writer) catch |err| switch (err) {
+        error.WriteFailed => return error.OutOfMemory,
+        else => return err,
+    };
+    try std.testing.expectEqualStrings(@embedFile("testdata/parser/composite_unique.expect.sql"), sql.written());
+}
+
+test "composite uniqueness owned pipeline and allocation failures" {
+    try compositePipeline(std.testing.allocator);
+    var backing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .resize_fail_index = 0 });
+    try std.testing.checkAllAllocationFailures(backing.allocator(), compositePipeline, .{});
+}
+
+test "table uniqueness after fields and contextual references" {
+    const source = "T {\nstr str\nunique str\nnow bool\nnulls int\n?? unique(str, unique, now, nulls) {\n#name `shared`\n}\n}\nU {\na int\n#check unique(a) {\n#name `shared`\n}\n}\n";
+    var syntax = try parser.parse(std.testing.allocator, source);
+    try std.testing.expect(syntax == .schema);
+    defer syntax.schema.deinit();
+    var semantic = try resolver.resolve(std.testing.allocator, syntax.schema.schema);
+    try std.testing.expect(semantic == .schema);
+    defer semantic.schema.deinit();
+    try std.testing.expectEqualSlices(usize, &.{ 0, 1, 2, 3 }, semantic.schema.schema.tables[0].unique_constraints[0].columns);
+}
+
+test "composite diagnostics and reference spans" {
+    for ([_][]const u8{
+        "?? unique(a,a)",
+        "?? unique(a,missing)",
+        "?? unique(a,b)\n#check unique(b,a)",
+        "?? unique(a)\n",
+        "?? unique(a,b) {\n#name `N`\n}",
+        "?? unique(a,b) {\n#name `N`\n#name `M`\n}",
+        "?? unique(a,b) {\n#name ``\n}",
+        "?? unique(a,b) {\n#name `n\x00x`\n}",
+    }, 0..) |directive, i| {
+        const source = try std.fmt.allocPrint(std.testing.allocator, "T {{\n{s}\na str {{\n? unique {{\n#name `n`\n}}\n}}\nb str\n}}\n", .{directive});
+        defer std.testing.allocator.free(source);
+        var syntax = try parser.parse(std.testing.allocator, source);
+        try std.testing.expect(syntax == .schema);
+        defer syntax.schema.deinit();
+        var semantic = try resolver.resolve(std.testing.allocator, syntax.schema.schema);
+        defer if (semantic == .schema) semantic.schema.deinit();
+        try std.testing.expect(semantic == .diagnostic);
+        if (i == 0 or i == 1) try std.testing.expectEqualStrings(if (i == 0) "a" else "missing", source[semantic.diagnostic.span.start..semantic.diagnostic.span.end]);
+    }
+}
+
+test "manual table unique invariants fail before writing" {
+    for ([_][]const resolved.UniqueConstraint{
+        &.{.{}},
+        &.{.{ .columns = &.{2} }},
+        &.{.{ .columns = &.{ 0, 0 } }},
+        &.{.{ .columns = &.{0}, .nulls = .equal }},
+        &.{.{ .columns = &.{0}, .name = "" }},
+        &.{ .{ .columns = &.{ 0, 1 } }, .{ .columns = &.{ 1, 0 } } },
+        &.{ .{ .columns = &.{0}, .name = "N" }, .{ .columns = &.{1}, .name = "n" } },
+    }) |uniques| {
+        var sql = std.Io.Writer.Allocating.init(std.testing.allocator);
+        defer sql.deinit();
+        emitter.emit(.{ .tables = &.{.{ .dsl_name = "T", .sql_name = "t", .unique_constraints = uniques, .columns = &.{
+            .{ .dsl_name = "a", .sql_name = "a", .type = .integer },
+            .{ .dsl_name = "b", .sql_name = "b", .type = .integer },
+        } }} }, &sql.writer) catch {
+            try std.testing.expectEqualStrings("", sql.written());
+            continue;
+        };
+        return error.ExpectedError;
+    }
+}
+
 test "native field uniqueness pipeline and allocation failures" {
     try pipeline(std.testing.allocator);
     var backing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .resize_fail_index = 0 });
@@ -34,7 +124,18 @@ test "native field uniqueness pipeline and allocation failures" {
 
 test "unique syntax rejects deferred features and invalid option bodies" {
     for ([_][]const u8{
-        "T {\n?? unique(a,b)\n}\n",
+        "T {\n?? unique()\n}\n",
+        "T {\n?? unique(a,)\n}\n",
+        "T {\n?? unique(_)\n}\n",
+        "T {\n?? unique(null)\n}\n",
+        "T {\n?? unique(true)\n}\n",
+        "T {\n?? unique(false)\n}\n",
+        "T {\n?? unique(`a`)\n}\n",
+        "T {\n?? unique(a b)\n}\n",
+        "T {\n?? unique\n}\n",
+        "T {\n?? unique(a) {\n#name `n`\n",
+        "T {\n?? unique(a) {\n--- docs\n#name `n`\n}\n}\n",
+        "T {\n--- docs\n?? unique(a)\n}\n",
         "T {\na str {\n? unique(nulls: equal)\n}\n}\n",
         "T {\na str {\n? unique =\n}\n}\n",
         "T {\na str {\n? unique {\n#allow reuse\n}\n}\n}\n",

@@ -858,8 +858,9 @@ email str =
 ```
 
 `#name` in this options scope names the constraint, not the field/table. `as` naming
-is deferred. Slice14 supports field uniqueness only, emitting a column
-`[CONSTRAINT quoted_name] UNIQUE` after defaults and checks, not a SQL `CHECK`.
+is deferred. Slice15 supports field and table uniqueness. Fields emit column
+`[CONSTRAINT quoted_name] UNIQUE` after defaults/checks; tables emit
+`[CONSTRAINT quoted_name] UNIQUE (quoted_columns)` after PKs/checks, not SQL `CHECK`.
 Options use same-line braces (including empty `{}`), never `=`. Only `#name`
 is accepted; duplicate names and duplicate field uniqueness are errors.
 Names must be nonempty with no NUL, are safely quoted verbatim, and must be
@@ -877,7 +878,7 @@ email str =
   ? unique
 ```
 
-### Composite uniqueness (deferred beyond Slice14)
+### Composite uniqueness (supported in Slice15)
 
 ```text
 Reader {
@@ -890,6 +891,15 @@ Reader {
 
 The pair is unique; neither field must be unique on its own. Adding a field-level
 `? unique` would impose an additional, stronger requirement.
+Table `#check unique(country, username)` is equivalent to the shortcut.
+At least one stored DSL field reference is required; `_`, reserved literals,
+SQL names, and virtual relationships are not references. Fields may be declared
+before or after the constraint, including SQL `#name` overrides. Source order
+is retained for SQL. Repeated fields and duplicate sets (including reversed
+lists or a table singleton duplicating field uniqueness) are errors.
+The optional braced `#name` body follows the same rules as field uniqueness.
+Boolean fields can be unique, although they cannot be primary keys.
+Indexes and nulls-equal options remain future work.
 
 ### Nulls
 

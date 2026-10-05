@@ -20,6 +20,23 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
     for (schema.tables) |table| {
         if (table.sql_name.len == 0 or std.mem.indexOfScalar(u8, table.sql_name, 0) != null) return error.InvalidIdentifier;
         const key_count = primaryKeyCount(table);
+        for (table.unique_constraints, 0..) |unique, n| {
+            if (unique.nulls != .distinct or unique.columns.len == 0) return error.InvalidUnique;
+            if (unique.name) |name| {
+                if (name.len == 0 or std.mem.indexOfScalar(u8, name, 0) != null) return error.InvalidIdentifier;
+            }
+            for (unique.columns, 0..) |index, k| {
+                if (index >= table.columns.len or std.mem.indexOfScalar(usize, unique.columns[0..k], index) != null) return error.InvalidUnique;
+            }
+            for (table.unique_constraints[0..n]) |prior| {
+                if (@import("unique.zig").sameFields(unique.columns, prior.columns)) return error.InvalidUnique;
+                if (unique.name) |name| if (prior.name) |p| if (std.ascii.eqlIgnoreCase(name, p)) return error.InvalidUnique;
+            }
+            for (table.columns, 0..) |column, index| for (column.unique_constraints) |prior| {
+                if (unique.columns.len == 1 and unique.columns[0] == index) return error.InvalidUnique;
+                if (unique.name) |name| if (prior.name) |p| if (std.ascii.eqlIgnoreCase(name, p)) return error.InvalidUnique;
+            };
+        }
         for (table.checks) |check| {
             try expression_emitter.preflight(check);
             if (@import("expression_resolver.zig").validateCheckResult(&check) != null) return error.InvalidCheck;
@@ -27,7 +44,7 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
         for (table.columns, 0..) |column, column_index| {
             if (column.unique_constraints.len > 1) return error.InvalidUnique;
             for (column.unique_constraints) |unique| {
-                if (unique.nulls != .distinct) return error.InvalidUnique;
+                if (unique.nulls != .distinct or unique.columns.len != 0) return error.InvalidUnique;
                 if (unique.name) |name| {
                     if (name.len == 0 or std.mem.indexOfScalar(u8, name, 0) != null) return error.InvalidIdentifier;
                     for (table.columns[0..column_index]) |previous| {
@@ -127,7 +144,7 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
                 }
                 try writer.writeAll(" UNIQUE");
             }
-            if (index + 1 < table.columns.len or key_count > 1 or table.checks.len > 0) try writer.writeByte(',');
+            if (index + 1 < table.columns.len or key_count > 1 or table.checks.len > 0 or table.unique_constraints.len > 0) try writer.writeByte(',');
             try writer.writeByte('\n');
         }
         if (key_count > 1) {
@@ -140,14 +157,30 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
                 first = false;
             }
             try writer.writeByte(')');
-            if (table.checks.len > 0) try writer.writeByte(',');
+            if (table.checks.len > 0 or table.unique_constraints.len > 0) try writer.writeByte(',');
             try writer.writeByte('\n');
         }
         for (table.checks, 0..) |check, index| {
             try writer.writeAll("  CHECK (");
             try expression_emitter.emit(check, writer);
             try writer.writeByte(')');
-            if (index + 1 < table.checks.len) try writer.writeByte(',');
+            if (index + 1 < table.checks.len or table.unique_constraints.len > 0) try writer.writeByte(',');
+            try writer.writeByte('\n');
+        }
+        for (table.unique_constraints, 0..) |unique, index| {
+            try writer.writeAll("  ");
+            if (unique.name) |name| {
+                try writer.writeAll("CONSTRAINT ");
+                try writeIdentifier(writer, name);
+                try writer.writeByte(' ');
+            }
+            try writer.writeAll("UNIQUE (");
+            for (unique.columns, 0..) |column_index, n| {
+                if (n != 0) try writer.writeAll(", ");
+                try writeIdentifier(writer, table.columns[column_index].sql_name);
+            }
+            try writer.writeByte(')');
+            if (index + 1 < table.unique_constraints.len) try writer.writeByte(',');
             try writer.writeByte('\n');
         }
         try writer.writeAll(") STRICT;\n");

@@ -254,9 +254,28 @@ const Parser = struct {
         while (self.current.kind == .newline or self.current.kind == .comment) try self.advance();
     }
 
-    fn unique(self: *Parser, start: usize) Error!parsed.Directive {
+    fn unique(self: *Parser, start: usize, field_scope: bool) Error!parsed.Directive {
         var end = self.current.span.end;
         try self.advance();
+        var fields: std.ArrayList(parsed.Token) = .empty;
+        if (self.current.kind == .l_paren) {
+            try self.advance();
+            try self.expressionTrivia();
+            if (self.word("nulls")) {
+                const rest = std.mem.trimStart(u8, self.lexer.source[self.current.span.end..], " \t");
+                if (std.mem.startsWith(u8, rest, ":"))
+                    return self.fail(self.current.span, "unique(nulls: equal) is unsupported; deferred");
+            }
+            if (field_scope) return self.fail(self.current.span, "Field uniqueness cannot specify field references");
+            while (true) {
+                try fields.append(self.allocator, token(try self.name()));
+                try self.expressionTrivia();
+                if (self.current.kind != .comma) break;
+                try self.advance();
+                try self.expressionTrivia();
+            }
+            end = (try self.take(.r_paren, "Expected ')' after unique fields")).span.end;
+        } else if (!field_scope) return self.fail(self.current.span, "Table uniqueness requires a nonempty field list");
         var options: std.ArrayList(parsed.Directive) = .empty;
         if (self.current.kind == .l_brace) {
             try self.advance();
@@ -278,7 +297,7 @@ const Parser = struct {
             }
             end = (try self.take(.r_brace, "Expected '}' to close unique options")).span.end;
         }
-        return .{ .kind = .{ .native_unique = .{ .options = try options.toOwnedSlice(self.allocator) } }, .span = .{ .start = start, .end = end } };
+        return .{ .kind = .{ .native_unique = .{ .fields = try fields.toOwnedSlice(self.allocator), .options = try options.toOwnedSlice(self.allocator) } }, .span = .{ .start = start, .end = end } };
     }
 
     fn check(self: *Parser, start: usize, field_scope: bool) Error!parsed.Directive {
@@ -286,11 +305,7 @@ const Parser = struct {
             var lookahead = self.lexer;
             const next = lookahead.next();
             if (next == .token) switch (next.token.kind) {
-                .l_paren => return self.fail(self.current.span, "unique(...) and nulls: equal are unsupported; deferred"),
-                .newline, .eof, .comment, .l_brace => {
-                    if (!field_scope) return self.fail(self.current.span, "Table composite uniqueness is unsupported; deferred");
-                    return self.unique(start);
-                },
+                .l_paren, .newline, .eof, .comment, .l_brace => return self.unique(start, field_scope),
                 else => {},
             };
         }

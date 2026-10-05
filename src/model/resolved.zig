@@ -18,6 +18,7 @@ pub const Table = struct {
     documentation: ?Documentation = null,
     sql_name: []const u8,
     columns: []const Column = &.{},
+    unique_constraints: []const UniqueConstraint = &.{},
     /// Explicit table checks in directive source order.
     checks: []const Expression = &.{},
 };
@@ -57,6 +58,8 @@ pub const Default = union(enum) {
 };
 
 pub const UniqueConstraint = struct {
+    /// Table constraints own ordered column indices; empty for column constraints.
+    columns: []const usize = &.{},
     name: ?[]const u8 = null,
     nulls: enum { distinct, equal } = .distinct,
 };

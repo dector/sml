@@ -2,14 +2,20 @@
 
 Status: the first supported parser milestone (stages 1–4) is implemented and
 covered by tokenizer, parser, allocation-failure, and source-to-SQL tests.
-Stage 5 is partially implemented through Slice14 single-field native uniqueness.
+Stage 5 is partially implemented through Slice15 table/composite native uniqueness.
 `? unique` / `#check unique` preserve a native_unique payload with empty field
 references and ordered, spanned options. Same-line brace options support exact
 backtick #name only; duplicates are preserved for resolver diagnostics.
 The resolved column carries unique_constraints; SQLite emission uses safely
 quoted optional CONSTRAINT names followed by UNIQUE after defaults/checks.
 Table-local constraint names compare ASCII-case-insensitively, independently
-of index object names. Plain NULLs remain distinct. Composite uniqueness,
+of index object names. Table `?? unique(a, b)` / `#check unique(a, b)` now
+preserve ordered reference tokens and the same optional name body. Resolution
+runs after all column metadata; resolved table constraints own column indices.
+One or more stored fields are required. Repeated references and duplicate sets
+(including reversed lists and field/table singleton duplicates) are rejected.
+The emitter validates indices and names before output and writes ordered,
+quoted table UNIQUE items after PKs/checks. Plain NULLs remain distinct.
 `unique(nulls: equal)`, named checks, and indexes remain deferred. Unsupported
 syntax is diagnosed rather than ignored.
 See [the language design](design-v1.md) for broader v1 scope.
@@ -320,7 +326,7 @@ Extend syntax models, parser, resolver, emitter, and tests together:
 
 1. Additional defaults and date/JSON types. Inline enums are complete;
    reusable types remain deferred indefinitely.
-2. Composite uniqueness, nulls-equal, named check bodies, and indexes (expression precedence, field checks, and table checks are implemented).
+2. Nulls-equal, named check bodies, and indexes (composite uniqueness, expression precedence, field checks, and table checks are implemented).
 3. Stored FKs and virtual relationships.
 4. Named/unnamed connections, roles, generated keys, and destination hints.
 5. Remaining directives and multiline literals after their rules are finalized.

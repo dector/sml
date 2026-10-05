@@ -100,7 +100,7 @@ pub const Default = union(enum) {
 /// A `name` argument includes its backtick delimiters; it is not yet decoded.
 /// The span covers the whole directive, including its argument.
 pub const NativeUnique = struct {
-    /// Empty for field scope; reserved for future composite constraints.
+    /// Empty for field scope; ordered DSL references for table scope.
     fields: []const Token = &.{},
     options: []const Directive = &.{},
 };

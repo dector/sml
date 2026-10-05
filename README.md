@@ -53,9 +53,14 @@ Docs cannot target checks or unique constraints. Single-field `? unique` and
 Optional same-line `{}` or multiline braces accept only `#name` backtick SQL
 names (including hash-delimited backticks). Names are exact, safely quoted,
 and unique ASCII-case-insensitively within each table, not global index names.
-Duplicate field uniqueness declarations and duplicate options are diagnosed.
-Plain uniqueness allows multiple NULLs. `unique(nulls: equal)` is explicitly
-deferred, as are table composite uniqueness, named checks, and indexes.
+Table `?? unique(fieldA, fieldB)` / `#check unique(fieldA, fieldB)` support
+composite uniqueness and the same optional `#name` body. One or more stored DSL
+field names are required; references resolve after metadata, including forward
+references and SQL `#name` overrides. SQL preserves the field list order.
+Repeated fields, duplicate field sets (even reversed or field/table singletons),
+and duplicate options are diagnosed. Table constraints follow PKs/checks.
+Plain uniqueness allows multiple NULLs, including composite NULL components.
+`unique(nulls: equal)`, named checks, and indexes remain explicitly deferred.
 Ordinary expressions such as `? unique == 'x'` still parse `unique` as an identifier.
 Unsupported later-v1 syntax returns a diagnostic.
 
