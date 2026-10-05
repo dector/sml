@@ -356,11 +356,16 @@ test "parser comment-only indentation body and blank lines preserve scope" {
 }
 
 test "parser brace indentation is independent of indentation bodies" {
-    const source = "   T {\n a int =\n   #name `a`\n             }\n";
-    var result = try parse(std.testing.allocator, source);
-    try std.testing.expect(result == .schema);
-    defer result.schema.deinit();
-    try std.testing.expectEqual(@as(usize, 1), result.schema.schema.tables[0].fields[0].directives.len);
+    for ([_][]const u8{
+        "   T {\n a int =\n   #name `a`\n             }\n",
+        "T {\na int =\n  #name `a`\n  }\n",
+        "T {\na int =\n  #name `a`\n    }\n",
+    }) |source| {
+        var result = try parse(std.testing.allocator, source);
+        try std.testing.expect(result == .schema);
+        defer result.schema.deinit();
+        try std.testing.expectEqual(@as(usize, 1), result.schema.schema.tables[0].fields[0].directives.len);
+    }
 }
 
 test "parser rejects unsupported syntax, incomplete constructs and invalid scope rules" {

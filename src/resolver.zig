@@ -1,4 +1,4 @@
-//! Semantic resolution of the modeled subset (no parser or reusable types).
+//! Semantic resolution of the modeled subset (no reusable types yet).
 //! `resolve` returns either an owned schema or the first source-span diagnostic.
 //! Allocator failures are returned separately as OutOfMemory. Success owns all
 //! arrays and strings, does not borrow parsed input, and must be deinitialized.
