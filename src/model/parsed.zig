@@ -1,7 +1,8 @@
 //! Parsed syntax, before semantic resolution. Names and type references are DSL
 //! names; no SQL-name normalization, type lookup, or validation happens here.
 //! Text slices borrow the source buffer, which must outlive this model. The caller
-//! also owns the backing arrays. Spans use zero-based byte offsets, end-exclusive.
+//! also owns the backing arrays (or uses OwnedSchema). Documentation text may
+//! be arena-owned to join source lines. Spans are zero-based, end-exclusive.
 const std = @import("std");
 
 pub const Span = struct {
@@ -20,8 +21,36 @@ pub const Schema = struct {
     tables: []const Table = &.{},
 };
 
+/// Attached declaration docs, with delimiters removed and lines joined by LF.
+pub const Documentation = struct {
+    text: []const u8,
+    span: Span,
+};
+
+pub const Diagnostic = struct {
+    span: Span,
+    message: []const u8,
+};
+
+/// Owns syntax arrays and joined docs, but token text still borrows source.
+pub const OwnedSchema = struct {
+    schema: Schema,
+    arena: std.heap.ArenaAllocator,
+
+    pub fn deinit(self: *OwnedSchema) void {
+        self.arena.deinit();
+        self.* = undefined;
+    }
+};
+
+pub const Result = union(enum) {
+    schema: OwnedSchema,
+    diagnostic: Diagnostic,
+};
+
 pub const Table = struct {
     name: Token,
+    documentation: ?Documentation = null,
     fields: []const Field = &.{},
     directives: []const Directive = &.{},
     span: Span,
@@ -29,6 +58,7 @@ pub const Table = struct {
 
 pub const Field = struct {
     name: Token,
+    documentation: ?Documentation = null,
     type: TypeRef,
     /// Whether the declaration has a `!` marker. Reuse is a separate directive
     /// in syntax, unlike the combined policy in the resolved model.

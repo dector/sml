@@ -33,10 +33,13 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
     for (schema.tables) |table| {
         const key_count = primaryKeyCount(table);
 
-        try writer.writeAll("\nCREATE TABLE ");
+        try writer.writeByte('\n');
+        if (table.documentation) |docs| try writeDocumentation(writer, docs.text, "");
+        try writer.writeAll("CREATE TABLE ");
         try writeIdentifier(writer, table.sql_name);
         try writer.writeAll(" (\n");
         for (table.columns, 0..) |column, index| {
+            if (column.documentation) |docs| try writeDocumentation(writer, docs.text, "  ");
             try writer.writeAll("  ");
             try writeIdentifier(writer, column.sql_name);
             try writer.writeByte(' ');
@@ -73,6 +76,27 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
         }
         try writer.writeAll(") STRICT;\n");
     }
+}
+
+/// Prefix every physical line, including CR-separated lines, so docs cannot
+/// inject SQL. NUL is rendered visibly rather than terminating SQLite source.
+fn writeDocumentation(writer: *std.Io.Writer, text: []const u8, indent: []const u8) std.Io.Writer.Error!void {
+    try writer.writeAll(indent);
+    try writer.writeAll("-- ");
+    var i: usize = 0;
+    while (i < text.len) : (i += 1) {
+        switch (text[i]) {
+            '\r', '\n' => {
+                if (text[i] == '\r' and i + 1 < text.len and text[i + 1] == '\n') i += 1;
+                try writer.writeByte('\n');
+                try writer.writeAll(indent);
+                try writer.writeAll("-- ");
+            },
+            0 => try writer.writeAll("\\0"),
+            else => try writer.writeByte(text[i]),
+        }
+    }
+    try writer.writeByte('\n');
 }
 
 fn validateDefault(column: resolved.Column, value: resolved.Default) Error!void {

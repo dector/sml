@@ -32,9 +32,9 @@ test "parsed to resolved to SQL fixture covers builtins naming defaults and reus
     var id = field("id", "int");
     id.primary_key = true;
     id.directives = &.{.{ .kind = .allow_reuse, .span = span }};
-    var title = field("URLValue", "text");
+    var title = field("URLValue", "str");
     title.default = .{ .text = token("'It''s C:\\books'") };
-    var raw = field("rawText", "text");
+    var raw = field("rawText", "str");
     raw.default = .{ .text = token("##'This contains '# and \\ literally'##") };
     var real = field("ratio", "real");
     real.default = .{ .real = token("001.250") };
@@ -42,7 +42,7 @@ test "parsed to resolved to SQL fixture covers builtins naming defaults and reus
     whole.default = .{ .integer = token("+002") };
     var blob = field("payload", "blob");
     blob.default = .{ .raw_sql = token("`X'00FF'`") };
-    var optional = field("optional", "text");
+    var optional = field("optional", "str");
     optional.type.nullable = true;
     optional.default = .{ .null_value = token("null") };
     var exact = field("exact", "int");
@@ -85,7 +85,7 @@ test "snake conversion acronym boundaries and normal camel Pascal names" {
 }
 
 test "unknown builtin aliases and unmodeled reusable references report type token span" {
-    for ([_][]const u8{ "Money", "bool", "datetime", "string", "Int", "text[]" }) |name| {
+    for ([_][]const u8{ "Money", "bool", "datetime", "text", "string", "Int", "str[]" }) |name| {
         var f = field("value", name);
         f.type.name.span = .{ .start = 40, .end = 45 };
         try expectDiagnostic(.{ .tables = &.{table("T", &.{f})} }, .unknown_type, f.type.name.span);
@@ -156,7 +156,7 @@ test "primary-key validation including composite policy" {
         try expectDiagnostic(.{ .tables = &.{table("T", &.{f})} }, .default_on_auto_primary_key, span);
     }
     f.default = null;
-    for ([_][]const u8{ "real", "text", "blob" }) |name| {
+    for ([_][]const u8{ "real", "str", "blob" }) |name| {
         f.type.name = token(name);
         try expectDiagnostic(.{ .tables = &.{table("T", &.{f})} }, .invalid_id_reuse, span);
     }
@@ -179,22 +179,22 @@ test "literal decoding mismatches malformed delimiters overflow and unsupported 
     const cases = [_]Case{
         .{ .type_name = "int", .default = .{ .text = token("'1'") }, .category = .invalid_default },
         .{ .type_name = "int", .default = .{ .real = token("1.0") }, .category = .invalid_default },
-        .{ .type_name = "text", .default = .{ .integer = token("1") }, .category = .invalid_default },
+        .{ .type_name = "str", .default = .{ .integer = token("1") }, .category = .invalid_default },
         .{ .type_name = "blob", .default = .{ .text = token("'bytes'") }, .category = .invalid_default },
-        .{ .type_name = "text", .default = .{ .null_value = token("null") }, .category = .invalid_default },
+        .{ .type_name = "str", .default = .{ .null_value = token("null") }, .category = .invalid_default },
         .{ .type_name = "int", .default = .{ .integer = token("9223372036854775808") }, .category = .invalid_literal },
         .{ .type_name = "int", .default = .{ .integer = token("oops") }, .category = .invalid_literal },
         .{ .type_name = "real", .default = .{ .real = token("1e9999") }, .category = .invalid_literal },
         .{ .type_name = "real", .default = .{ .real = token("nan") }, .category = .invalid_literal },
         .{ .type_name = "real", .default = .{ .real = token("oops") }, .category = .invalid_literal },
-        .{ .type_name = "text", .default = .{ .text = token("'it's'") }, .category = .invalid_literal },
-        .{ .type_name = "text", .default = .{ .text = token("\"text\"") }, .category = .invalid_literal },
-        .{ .type_name = "text", .default = .{ .text = token("'") }, .category = .invalid_literal },
-        .{ .type_name = "text", .default = .{ .text = token("##'mismatch'#") }, .category = .invalid_literal },
-        .{ .type_name = "text", .default = .{ .text = token("#'early'#close'#") }, .category = .invalid_literal },
-        .{ .type_name = "text", .default = .{ .text = token("#'''x'''#") }, .category = .unsupported_multiline },
-        .{ .type_name = "text", .default = .{ .text = token("#'a\nb'#") }, .category = .unsupported_multiline },
-        .{ .type_name = "text", .default = .{ .text = token("'a\nb'") }, .category = .unsupported_multiline },
+        .{ .type_name = "str", .default = .{ .text = token("'it's'") }, .category = .invalid_literal },
+        .{ .type_name = "str", .default = .{ .text = token("\"text\"") }, .category = .invalid_literal },
+        .{ .type_name = "str", .default = .{ .text = token("'") }, .category = .invalid_literal },
+        .{ .type_name = "str", .default = .{ .text = token("##'mismatch'#") }, .category = .invalid_literal },
+        .{ .type_name = "str", .default = .{ .text = token("#'early'#close'#") }, .category = .invalid_literal },
+        .{ .type_name = "str", .default = .{ .text = token("#'''x'''#") }, .category = .unsupported_multiline },
+        .{ .type_name = "str", .default = .{ .text = token("#'a\nb'#") }, .category = .unsupported_multiline },
+        .{ .type_name = "str", .default = .{ .text = token("'a\nb'") }, .category = .unsupported_multiline },
         .{ .type_name = "blob", .default = .{ .raw_sql = token("``") }, .category = .invalid_literal },
         .{ .type_name = "blob", .default = .{ .raw_sql = token("`a`b`") }, .category = .invalid_literal },
         .{ .type_name = "blob", .default = .{ .raw_sql = token("`a\x00b`") }, .category = .invalid_literal },
@@ -205,7 +205,7 @@ test "literal decoding mismatches malformed delimiters overflow and unsupported 
         try expectDiagnostic(.{ .tables = &.{table("T", &.{f})} }, case.category, span);
     }
     for ([_][]const u8{ "''", "#''#", "##''##", "'\\n'", "'a\x00b'" }, [_][]const u8{ "", "", "", "\\n", "a\x00b" }) |input, expected| {
-        var f = field("value", "text");
+        var f = field("value", "str");
         f.default = .{ .text = token(input) };
         var result = try resolver.resolve(std.testing.allocator, .{ .tables = &.{table("T", &.{f})} });
         defer result.schema.deinit();
@@ -214,9 +214,12 @@ test "literal decoding mismatches malformed delimiters overflow and unsupported 
 }
 
 fn allocationScenario(allocator: std.mem.Allocator) !void {
-    var f = field("URLValue", "text");
+    var f = field("URLValue", "str");
     f.default = .{ .text = token("'it''s literal'") };
-    var result = try resolver.resolve(allocator, .{ .tables = &.{table("HTTPServer", &.{f})} });
+    f.documentation = .{ .text = "Column docs", .span = span };
+    var t = table("HTTPServer", &.{f});
+    t.documentation = .{ .text = "Table docs", .span = span };
+    var result = try resolver.resolve(allocator, .{ .tables = &.{t} });
     defer result.schema.deinit();
     var invalid = field("bad", "Unknown");
     invalid.default = null;
@@ -226,6 +229,60 @@ fn allocationScenario(allocator: std.mem.Allocator) !void {
 
 test "allocation failures and semantic failures release partial owned state" {
     try std.testing.checkAllAllocationFailures(std.testing.allocator, allocationScenario, .{});
+}
+
+test "hash backticks preserve content and require exact closing hash counts" {
+    const cases = [_]struct { literal: []const u8, content: []const u8 }{
+        .{ .literal = "`ordinary`", .content = "ordinary" },
+        .{ .literal = "#`foo`bar`#", .content = "foo`bar" },
+        .{ .literal = "##`contains `# and `### safely`##", .content = "contains `# and `### safely" },
+        .{ .literal = "#`double``tick`#", .content = "double``tick" },
+    };
+    for (cases) |case| {
+        var f = field("value", "str");
+        f.directives = &.{.{ .kind = .{ .name = token(case.literal) }, .span = span }};
+        f.default = .{ .raw_sql = token(case.literal) };
+        var t = table("T", &.{f});
+        t.directives = f.directives;
+        var result = try resolver.resolve(std.testing.allocator, .{ .tables = &.{t} });
+        defer result.schema.deinit();
+        try std.testing.expectEqualStrings(case.content, result.schema.schema.tables[0].sql_name);
+        const column = result.schema.schema.tables[0].columns[0];
+        try std.testing.expectEqualStrings(case.content, column.sql_name);
+        try std.testing.expectEqualStrings(case.content, column.default.?.raw_sql);
+    }
+    for ([_][]const u8{ "#`missing`", "#`mismatch`##", "##`mismatch`#", "#`early`#end`#", "`early`#end`", "###", "#``#trailing" }) |literal| {
+        var f = field("value", "str");
+        f.default = .{ .raw_sql = token(literal) };
+        try expectDiagnostic(.{ .tables = &.{table("T", &.{f})} }, .invalid_literal, span);
+    }
+    for ([_][]const u8{ "`a\nb`", "#`a\rb`#" }) |literal| {
+        var f = field("value", "str");
+        f.default = .{ .raw_sql = token(literal) };
+        try expectDiagnostic(.{ .tables = &.{table("T", &.{f})} }, .unsupported_multiline, span);
+    }
+}
+
+test "documentation is owned with source spans and emitted as safe SQL comments" {
+    var source = [_]u8{ 'D', 'o', 'c', 's' };
+    var f = field("value", "str");
+    f.documentation = .{ .text = &source, .span = span };
+    var t = table("T", &.{f});
+    t.documentation = .{ .text = "Table\nDROP TABLE t;\rSELECT 1;\r\n*/ --\x00", .span = span };
+    var result = try resolver.resolve(std.testing.allocator, .{ .tables = &.{t} });
+    defer result.schema.deinit();
+    @memset(&source, 'x');
+    const schema = result.schema.schema;
+    try std.testing.expectEqualStrings("Docs", schema.tables[0].columns[0].documentation.?.text);
+    try std.testing.expectEqual(span, schema.tables[0].documentation.?.span);
+    try std.testing.expectEqual(span, schema.tables[0].columns[0].documentation.?.span);
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+    try emitter.emit(schema, &output.writer);
+    try std.testing.expectEqualStrings(
+        "PRAGMA foreign_keys = ON;\n\n-- Table\n-- DROP TABLE t;\n-- SELECT 1;\n-- */ --\\0\nCREATE TABLE \"t\" (\n  -- Docs\n  \"value\" TEXT NOT NULL\n) STRICT;\n",
+        output.written(),
+    );
 }
 
 test "resolved schema owns source strings and empty schemas" {

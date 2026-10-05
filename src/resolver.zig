@@ -86,10 +86,24 @@ const Context = struct {
 
     fn backticks(self: *Context, token: parsed.Token) Error![]const u8 {
         const text = token.text;
-        if (text.len < 2 or text[0] != '`' or text[text.len - 1] != '`' or
-            std.mem.indexOfScalar(u8, text[1 .. text.len - 1], '`') != null)
-            return self.fail(.invalid_literal, token.span, "expected backtick delimiters; embedded backticks are unsupported");
-        return text[1 .. text.len - 1];
+        if (std.mem.indexOfAny(u8, text, "\r\n") != null)
+            return self.fail(.unsupported_multiline, token.span, "multiline backticks are not supported yet");
+        var hashes: usize = 0;
+        while (hashes < text.len and text[hashes] == '#') : (hashes += 1) {}
+        if (text.len < 2 * hashes + 2 or text[hashes] != '`')
+            return self.fail(.invalid_literal, token.span, "expected matching backtick delimiters");
+        const start = hashes + 1;
+        var i = start;
+        while (i < text.len) : (i += 1) {
+            if (text[i] != '`') continue;
+            var end = i + 1;
+            while (end < text.len and text[end] == '#') : (end += 1) {}
+            if (hashes == 0) end = i + 1 else if (end - i - 1 != hashes) continue;
+            if (end != text.len)
+                return self.fail(.invalid_literal, token.span, "backtick literal contains its closing delimiter");
+            return text[start..i];
+        }
+        return self.fail(.invalid_literal, token.span, "expected matching backtick delimiters");
     }
 
     fn name(self: *Context, token: parsed.Token, override: ?parsed.Token) Error![]const u8 {
@@ -143,7 +157,7 @@ const Context = struct {
                     if (std.ascii.eqlIgnoreCase(previous.sql_name, column_name))
                         return self.fail(.sql_name_collision, if (field_opts.name) |n| n.span else field.name.span, "SQL column names collide (ASCII case-insensitive)");
                 }
-                const storage: resolved.StorageType = if (std.mem.eql(u8, field.type.name.text, "int")) .integer else if (std.mem.eql(u8, field.type.name.text, "real")) .real else if (std.mem.eql(u8, field.type.name.text, "text")) .text else if (std.mem.eql(u8, field.type.name.text, "blob")) .blob else return self.fail(.unknown_type, field.type.name.span, "unknown type; supported builtins are int, real, text, blob");
+                const storage: resolved.StorageType = if (std.mem.eql(u8, field.type.name.text, "int")) .integer else if (std.mem.eql(u8, field.type.name.text, "real")) .real else if (std.mem.eql(u8, field.type.name.text, "str")) .text else if (std.mem.eql(u8, field.type.name.text, "blob")) .blob else return self.fail(.unknown_type, field.type.name.span, "unknown type; supported builtins are int, real, str, blob");
                 if (field.primary_key and field.type.nullable)
                     return self.fail(.nullable_primary_key, field.type.span, "primary-key fields cannot be nullable");
                 if (field_opts.reuse) |span| {
@@ -164,11 +178,17 @@ const Context = struct {
                     .nullable = field.type.nullable,
                     .primary_key = if (field_opts.reuse != null) .allow_reuse else if (field.primary_key) .standard else .none,
                     .default = value,
+                    .documentation = try self.documentation(field.documentation),
                 };
             }
-            tables[i] = .{ .dsl_name = try self.allocator.dupe(u8, table.name.text), .sql_name = sql_name, .columns = columns };
+            tables[i] = .{ .dsl_name = try self.allocator.dupe(u8, table.name.text), .sql_name = sql_name, .columns = columns, .documentation = try self.documentation(table.documentation) };
         }
         return .{ .tables = tables };
+    }
+
+    fn documentation(self: *Context, docs: ?parsed.Documentation) Error!?resolved.Documentation {
+        const value = docs orelse return null;
+        return .{ .text = try self.allocator.dupe(u8, value.text), .span = value.span };
     }
 
     fn defaultValue(self: *Context, value: parsed.Default, storage: resolved.StorageType, nullable: bool) Error!resolved.Default {

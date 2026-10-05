@@ -1,5 +1,10 @@
 //! Resolved schema model: the boundary between semantic resolution and SQL generation.
 
+pub const Documentation = struct {
+    text: []const u8,
+    span: @import("parsed.zig").Span,
+};
+
 pub const Schema = struct {
     tables: []const Table = &.{},
     relationships: []const Relationship = &.{},
@@ -8,6 +13,7 @@ pub const Schema = struct {
 /// Stored tables, including expanded connection tables.
 pub const Table = struct {
     dsl_name: []const u8,
+    documentation: ?Documentation = null,
     sql_name: []const u8,
     columns: []const Column = &.{},
 };
@@ -42,6 +48,7 @@ pub const Default = union(enum) {
 /// A stored column. Semantic resolution chooses its SQLite storage type.
 pub const Column = struct {
     dsl_name: []const u8,
+    documentation: ?Documentation = null,
     sql_name: []const u8,
     type: StorageType,
     nullable: bool = false,
