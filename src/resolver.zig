@@ -10,6 +10,7 @@ const literals = @import("literal_decoder.zig");
 const expression_resolver = @import("expression_resolver.zig");
 
 pub const Category = enum {
+    unsupported_feature,
     unknown_type,
     invalid_identifier,
     duplicate_dsl_name,
@@ -143,6 +144,8 @@ const Context = struct {
             }
             const columns = try self.allocator.alloc(resolved.Column, table.fields.len);
             for (table.fields, 0..) |field, j| {
+                if (field.foreign_key)
+                    return self.fail(.unsupported_feature, field.span, "Stored foreign keys are not supported yet");
                 for (table.fields[0..j]) |previous| {
                     if (std.mem.eql(u8, previous.name.text, field.name.text))
                         return self.fail(.duplicate_dsl_name, field.name.span, "duplicate DSL field name");

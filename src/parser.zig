@@ -156,7 +156,9 @@ const Parser = struct {
 
     fn field(self: *Parser, docs: ?parsed.Documentation) Error!parsed.Field {
         const first = self.current;
-        const primary = first.kind == .bang;
+        const foreign_key = first.kind == .star;
+        if (foreign_key) try self.advance();
+        const primary = self.current.kind == .bang;
         if (primary) try self.advance();
         const field_name = try self.name();
         const type_name = try self.name();
@@ -247,7 +249,7 @@ const Parser = struct {
             },
             else => try self.lineEnd(),
         }
-        return .{ .name = token(field_name), .documentation = docs, .type = .{ .name = token(type_name), .nullable = nullable, .span = type_span }, .primary_key = primary, .default = default, .directives = try directives.toOwnedSlice(self.allocator), .span = .{ .start = first.span.start, .end = end } };
+        return .{ .name = token(field_name), .documentation = docs, .type = .{ .name = token(type_name), .nullable = nullable, .span = type_span }, .primary_key = primary, .foreign_key = foreign_key, .default = default, .directives = try directives.toOwnedSlice(self.allocator), .span = .{ .start = first.span.start, .end = end } };
     }
 
     fn expressionTrivia(self: *Parser) Error!void {

@@ -65,12 +65,15 @@ pub const Field = struct {
     /// Whether the declaration has a `!` marker. Reuse is a separate directive
     /// in syntax, unlike the combined policy in the resolved model.
     primary_key: bool = false,
+    /// Stored `*field Target`: `type` names the target table, not a scalar type.
+    /// Independent of primary-key membership; marker order is `*` then `!`.
+    foreign_key: bool = false,
     default: ?Default = null,
     directives: []const Directive = &.{},
     span: Span,
 };
 
-/// A built-in or reusable type name; it has not been looked up or lowered.
+/// A built-in/reusable type or stored-FK target table name; not looked up or lowered.
 pub const TypeRef = struct {
     name: Token,
     nullable: bool = false,

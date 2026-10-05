@@ -73,6 +73,17 @@ pub const UniqueConstraint = struct {
     nulls: enum { distinct, equal } = .distinct,
 };
 
+/// FK deletion policy. No update actions are modeled.
+pub const DeleteAction = enum { restrict, cascade, set_null };
+
+/// Resolved single-column FK metadata; SQL names are owned with the schema.
+/// The local Column carries the inherited logical type and enum allowed values.
+pub const ForeignKey = struct {
+    target_table_sql_name: []const u8,
+    target_column_sql_name: []const u8,
+    delete_action: DeleteAction = .restrict,
+};
+
 /// A stored column. Semantic resolution chooses its logical/storage type.
 pub const Column = struct {
     dsl_name: []const u8,
@@ -83,6 +94,7 @@ pub const Column = struct {
     enum_values: []const []const u8 = &.{},
     nullable: bool = false,
     primary_key: PrimaryKey = .none,
+    foreign_key: ?ForeignKey = null,
     default: ?Default = null,
     /// Explicit field checks in source order; builtin checks are emitted separately.
     checks: []const Expression = &.{},
