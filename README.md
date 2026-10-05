@@ -46,6 +46,27 @@ bodies, and arithmetic are not supported; negative numeric literals remain valid
 References are not resolved, reusable types are deferred indefinitely, and this API
 does not extend schema defaults or constraints.
 
+`expression_resolver.resolve(allocator, expression, context)` owns its resolved
+result and permits scalar roots. For CHECKs, also call
+`expression_resolver.validateCheckResult(&result.expression.expression)`; it returns
+an optional diagnostic and requires Boolean or trusted raw SQL.
+
+Operand typing (logical types, not SQLite storage coercions):
+
+| Operators | Accepted DSL operands |
+| --- | --- |
+| `!`, `&&`, `||` | Boolean only |
+| `==`, `!=` | Same family: numeric (int/real), text (str/enum), datetime, Boolean, blob references |
+| `<`, `<=`, `>`, `>=` | Numeric, text, or datetime family only |
+
+Datetime also compares with a valid canonical `YYYY-MM-DDTHH:MM:SSZ` string
+literal on either side, not a str/enum reference. Enum values compare as text;
+no enum membership check applies here. Operators return Boolean and propagate
+operand nullability. Raw SQL has unknown type and is trusted, including whole
+CHECK roots, but cannot excuse a known non-Boolean logical operand or known
+Boolean/blob ordering operand. Null comparisons currently report
+`null comparisons not supported yet`; SQL null rewrites are deferred.
+
 ## Development
 
 Use Zig 0.17.0.

@@ -1,9 +1,10 @@
-//! Owned reference/literal resolution. Operand compatibility is a later pass.
+//! Owned expression resolution with strict logical operand type validation.
 const std = @import("std");
 const parsed = @import("model/parsed.zig");
 const resolved = @import("model/resolved.zig");
 const model = @import("model/resolved_expression.zig");
 const literals = @import("literal_decoder.zig");
+const datetime = @import("datetime.zig");
 
 pub const Category = enum {
     invalid_context,
@@ -13,6 +14,9 @@ pub const Category = enum {
     invalid_identifier,
     unsupported_multiline,
     excessive_depth,
+    incompatible_operands,
+    invalid_check_type,
+    unsupported_null_comparison,
 };
 pub const Diagnostic = struct { category: Category, span: parsed.Span, message: []const u8 };
 pub const Context = struct { table: resolved.Table, field_index: ?usize = null };
@@ -50,6 +54,21 @@ pub fn resolve(allocator: std.mem.Allocator, input: parsed.Expression, context: 
         },
     };
     return .{ .expression = .{ .expression = expression, .arena = arena } };
+}
+
+/// Validate a resolved CHECK root separately; resolve() also permits scalars.
+/// Opaque raw SQL is trusted. Nullable Boolean results are valid CHECK roots.
+pub fn validateCheckResult(expression: *const resolved.Expression) ?Diagnostic {
+    var root = expression;
+    var depth: usize = 0;
+    while (root.kind == .grouping) : (depth += 1) {
+        if (depth >= max_depth) return .{ .category = .excessive_depth, .span = expression.span, .message = "Expression structural depth exceeds maximum of 256" };
+        root = root.kind.grouping;
+    }
+    if (root.type_info) |info| {
+        if (info.type == .boolean) return null;
+    } else if (root.kind == .raw_sql) return null;
+    return .{ .category = .invalid_check_type, .span = expression.span, .message = "CHECK expression must be Boolean or trusted raw SQL" };
 }
 
 const Worker = struct {
@@ -123,17 +142,64 @@ const Worker = struct {
             },
             .unary => |unary| {
                 const operand = try self.child(unary.operand, depth + 1);
+                try self.requireBoolean(operand);
                 output.kind = .{ .unary = .{ .operator = unary.operator, .operand = operand } };
                 output.type_info = .{ .type = .boolean, .nullable = maybeNullable(operand) };
             },
             .binary => |binary| {
                 const left = try self.child(binary.left, depth + 1);
                 const right = try self.child(binary.right, depth + 1);
+                switch (binary.operator) {
+                    .logical_and, .logical_or => {
+                        try self.requireBoolean(left);
+                        try self.requireBoolean(right);
+                    },
+                    else => try self.comparison(left, right, binary.operator, input.span),
+                }
                 output.kind = .{ .binary = .{ .operator = binary.operator, .left = left, .right = right } };
                 output.type_info = .{ .type = .boolean, .nullable = maybeNullable(left) or maybeNullable(right) };
             },
         }
         return output;
+    }
+
+    fn requireBoolean(self: *Worker, operand: *const resolved.Expression) Error!void {
+        if (operand.type_info) |info| {
+            if (info.type == .boolean) return;
+        } else if (ungroup(operand).kind == .raw_sql) return;
+        return self.fail(.incompatible_operands, operand.span, "logical operators require Boolean operands (or trusted raw SQL)");
+    }
+
+    fn comparison(self: *Worker, left: *const resolved.Expression, right: *const resolved.Expression, operator: model.BinaryOperator, span: parsed.Span) Error!void {
+        if (ungroup(left).kind == .null_value or ungroup(right).kind == .null_value)
+            return self.fail(.unsupported_null_comparison, span, "null comparisons not supported yet");
+        const ordering = operator != .equal and operator != .not_equal;
+        // Even with an opaque peer, a known Boolean/blob cannot be ordered.
+        if (ordering) {
+            for ([_]*const resolved.Expression{ left, right }) |operand| {
+                if (operand.type_info) |info| {
+                    if (info.type == .boolean or info.type == .blob)
+                        return self.fail(.incompatible_operands, operand.span, "ordering requires numeric, text/enum, or datetime operands; Boolean and blob cannot be ordered");
+                }
+            }
+        }
+        const l = if (left.type_info) |info| info.type else return;
+        const r = if (right.type_info) |info| info.type else return;
+        if (l == .datetime and r == .text and ungroup(right).kind == .text) {
+            try self.datetimeLiteral(right);
+            return;
+        }
+        if (r == .datetime and l == .text and ungroup(left).kind == .text) {
+            try self.datetimeLiteral(left);
+            return;
+        }
+        if (l == r or (numeric(l) and numeric(r)) or (textual(l) and textual(r))) return;
+        return self.fail(.incompatible_operands, span, "comparison requires matching logical families: numeric, text/enum, datetime, Boolean equality, or blob-reference equality");
+    }
+
+    fn datetimeLiteral(self: *Worker, operand: *const resolved.Expression) Error!void {
+        if (!datetime.valid(ungroup(operand).kind.text))
+            return self.fail(.invalid_literal, operand.span, "datetime comparison literal must be a valid canonical UTC YYYY-MM-DDTHH:MM:SSZ timestamp");
     }
 
     // Reject malformed manually constructed numeric tokens before conversion.
@@ -154,6 +220,21 @@ const Worker = struct {
         if (i != text.len) return self.fail(.invalid_literal, token.span, "invalid decimal literal spelling");
     }
 };
+
+// Resolver-owned trees have already passed the structural depth guard.
+fn ungroup(expression: *const resolved.Expression) *const resolved.Expression {
+    var node = expression;
+    while (node.kind == .grouping) node = node.kind.grouping;
+    return node;
+}
+
+fn numeric(kind: resolved.StorageType) bool {
+    return kind == .integer or kind == .real;
+}
+
+fn textual(kind: resolved.StorageType) bool {
+    return kind == .text or kind == .enumeration;
+}
 
 fn maybeNullable(expression: *const resolved.Expression) bool {
     return if (expression.type_info) |info| info.nullable else true;

@@ -84,10 +84,7 @@ test "literal conversions preserve original decimal spelling and exact hash deli
     var null_value = try run(a, "null", .{ .table = table });
     defer null_value.expression.deinit();
     try std.testing.expect(null_value.expression.expression.type_info == null);
-    // Deliberately no operand compatibility validation in this pass.
-    var mixed = try run(a, "1 == 'x'", .{ .table = table });
-    defer mixed.expression.deinit();
-    try std.testing.expectEqual(resolved.StorageType.boolean, mixed.expression.expression.type_info.?.type);
+    try diagnostic("1 == 'x'", .{ .table = table }, .incompatible_operands, 0, 8);
 }
 
 fn leaf(comptime tag: std.meta.Tag(@FieldType(parsed.Expression, "kind")), text: []const u8) parsed.Expression {
@@ -149,16 +146,12 @@ test "structural depth 256 accepted 257 rejected even for manual and cyclic tree
     try std.testing.expectEqual(resolver.Category.excessive_depth, cyclic.diagnostic.category);
 }
 
-test "every operator resolves children without compatibility checks" {
+test "null comparisons are deferred and logical null is not Boolean" {
     const operators = [_][]const u8{ "==", "!=", "<", "<=", ">", ">=", "&&", "||" };
     inline for (operators) |operator| {
-        var result = try run(a, "null " ++ operator ++ " true", .{ .table = table });
-        defer result.expression.deinit();
-        const expression = result.expression.expression;
-        try std.testing.expect(expression.kind.binary.left.kind == .null_value);
-        try std.testing.expect(expression.kind.binary.right.kind.boolean);
-        try std.testing.expectEqual(resolved.StorageType.boolean, expression.type_info.?.type);
-        try std.testing.expect(expression.type_info.?.nullable);
+        const source = "null " ++ operator ++ " true";
+        const logical = comptime std.mem.eql(u8, operator, "&&") or std.mem.eql(u8, operator, "||");
+        try diagnostic(source, .{ .table = table }, if (logical) .incompatible_operands else .unsupported_null_comparison, 0, if (logical) 4 else source.len);
     }
     // The right child must be resolved even if the left is trusted SQL.
     try diagnostic("`trusted` == missing", .{ .table = table }, .unknown_reference, 13, 20);
@@ -170,13 +163,78 @@ fn fieldAllocationCase(allocator: std.mem.Allocator) !void {
 }
 
 fn allocationCase(allocator: std.mem.Allocator) !void {
-    var result = try run(allocator, "!(endAt == 'it''s') || `trusted` == ##'raw'##", .{ .table = table });
+    var result = try run(allocator, "!(endAt == '2000-02-29T00:00:00Z') || `trusted` == ##'raw'##", .{ .table = table });
     defer result.expression.deinit();
 }
 
 fn failureAllocationCase(allocator: std.mem.Allocator) !void {
-    const result = try run(allocator, "endAt == 'owned' && missing", .{ .table = table });
+    const result = try run(allocator, "endAt == '2000-01-01T00:00:00Z' && missing", .{ .table = table });
     try std.testing.expect(result == .diagnostic);
+}
+
+const typed_table: resolved.Table = .{ .dsl_name = "Types", .sql_name = "types", .columns = &.{
+    .{ .dsl_name = "i", .sql_name = "i", .type = .integer },
+    .{ .dsl_name = "r", .sql_name = "r", .type = .real },
+    .{ .dsl_name = "s", .sql_name = "s", .type = .text },
+    .{ .dsl_name = "e", .sql_name = "e", .type = .enumeration },
+    .{ .dsl_name = "d", .sql_name = "d", .type = .datetime, .nullable = true },
+    .{ .dsl_name = "b", .sql_name = "b", .type = .boolean, .nullable = true },
+    .{ .dsl_name = "blob", .sql_name = "blob", .type = .blob },
+} };
+
+test "strict logical family matrix with trusted SQL and nullable propagation" {
+    const context: resolver.Context = .{ .table = typed_table };
+    const accepted = [_][]const u8{
+        "i == r",       "r >= i",                       "1 < 1.5",                     "s == e",    "e < s",         "e == 'outside enum'",
+        "d == d",       "d < ('2000-02-29T23:59:59Z')", "'2000-01-01T00:00:00Z' >= d", "b != true", "blob == blob",  "blob != (blob)",
+        "!b",           "b && true",                    "false || b",                  "!`opaque`", "`opaque` && b", "i == `opaque`",
+        "`opaque` < d", "blob == `opaque`",
+    };
+    for (accepted) |source| {
+        var result = try run(a, source, context);
+        try std.testing.expect(result == .expression);
+        defer result.expression.deinit();
+        try std.testing.expectEqual(resolved.StorageType.boolean, result.expression.expression.type_info.?.type);
+        try std.testing.expect(resolver.validateCheckResult(&result.expression.expression) == null);
+    }
+    const rejected = [_][]const u8{
+        "i == s", "s == b",    "b == 1",    "true < false",  "blob < blob",     "blob == s",
+        "d == s", "d == e",    "d == i",    "!1",            "!s",              "!d",
+        "!blob",  "i && true", "true || s", "`opaque` && 1", "blob < `opaque`", "`opaque` > b",
+    };
+    for (rejected) |source| {
+        const result = try run(a, source, context);
+        try std.testing.expect(result == .diagnostic);
+        try std.testing.expectEqual(resolver.Category.incompatible_operands, result.diagnostic.category);
+    }
+    for ([_][]const u8{ "b && true", "false || b", "!b", "d == d", "d > `opaque`", "true && `opaque`" }) |source| {
+        var result = try run(a, source, context);
+        defer result.expression.deinit();
+        try std.testing.expect(result.expression.expression.type_info.?.nullable);
+    }
+    var nonnullable = try run(a, "i == r && true", context);
+    defer nonnullable.expression.deinit();
+    try std.testing.expect(!nonnullable.expression.expression.type_info.?.nullable);
+    try diagnostic("d == '1900-02-29T00:00:00Z'", context, .invalid_literal, 5, 27);
+    try diagnostic("'bad' < d", context, .invalid_literal, 0, 5);
+    try diagnostic("d == '2000-01-01'", context, .invalid_literal, 5, 17);
+    try diagnostic("(null) == `opaque`", context, .unsupported_null_comparison, 0, 18);
+}
+
+test "CHECK root validation is separate from scalar resolution" {
+    const context: resolver.Context = .{ .table = typed_table };
+    for ([_][]const u8{ "1", "1.0", "'text'", "d", "e", "blob", "(null)" }) |source| {
+        var result = try run(a, source, context);
+        defer result.expression.deinit();
+        const failure = resolver.validateCheckResult(&result.expression.expression).?;
+        try std.testing.expectEqual(resolver.Category.invalid_check_type, failure.category);
+        try std.testing.expectEqualDeep(result.expression.expression.span, failure.span);
+    }
+    for ([_][]const u8{ "b", "(true)", "(`opaque`)", "i < r" }) |source| {
+        var result = try run(a, source, context);
+        defer result.expression.deinit();
+        try std.testing.expect(resolver.validateCheckResult(&result.expression.expression) == null);
+    }
 }
 
 test "allocation failures and semantic failure after allocations reclaim arena" {
