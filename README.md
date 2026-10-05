@@ -1,6 +1,6 @@
 # sml
 
-SQLite Modelling Language.
+SQLite Modeling Language.
 
 See [the v1 design](docs/design-v1.md).
 
