@@ -20,13 +20,21 @@ pub const StorageType = enum {
     blob,
 };
 
+/// Primary-key membership and ID generation policy.
+pub const PrimaryKey = enum {
+    none,
+    standard,
+    /// `#allow reuse`: omit AUTOINCREMENT on a single integer primary key.
+    allow_reuse,
+};
+
 /// A stored column. Semantic resolution chooses its SQLite storage type.
 pub const Column = struct {
     dsl_name: []const u8,
     sql_name: []const u8,
     type: StorageType,
     nullable: bool = false,
-    primary_key: bool = false,
+    primary_key: PrimaryKey = .none,
 };
 
 /// Virtual relationship metadata; never a stored column.

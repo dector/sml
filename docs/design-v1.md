@@ -537,14 +537,15 @@ explicit inserts of previously used IDs.
 
 ```text
 !id int =
-  #reuse
+  #allow reuse
 ```
 
 Generates `INTEGER PRIMARY KEY` without `AUTOINCREMENT`. SQLite still generates
 IDs, but may reuse a deleted ID, particularly a deleted highest ID.
 
-`#reuse` is only meaningful for an ordinary single-column integer primary key,
-not a composite key or a PK+FK.
+`#allow reuse` is only valid for an ordinary single-column integer primary key,
+not a non-key field, a non-integer key, a composite key, or a PK+FK. `reuse` is the
+only supported `#allow` option in v1.
 
 ### Composite keys
 
@@ -1590,7 +1591,7 @@ settle duplicate-key rejection for JSON supplied as a v1 string literal; SQLite'
 | Circular reusable types | Error |
 | Duplicate SQL names after conversion/`#name` | Error |
 | Nullable primary-key component | Error |
-| `#reuse` on a composite key or PK+FK | Error |
+| `#allow reuse` on a non-key field, non-integer key, composite key, or PK+FK | Error |
 | Default on auto-generated integer PK | Error |
 | Both explicit default and `#use default` | Error |
 | `#use default` without an available type default | Error |
@@ -1841,7 +1842,7 @@ validation, Unicode collation, timezone conversion, or automatic query loading.
 
 ### Enforcement
 
-- Integer IDs with and without `#reuse` after deleting the highest row.
+- Integer IDs with and without `#allow reuse` after deleting the highest row.
 - Explicit inserts versus generated `AUTOINCREMENT` IDs.
 - Explicit null generating a rowid-backed integer PK, but failing for a shared
   PK+FK in a `WITHOUT ROWID` table.

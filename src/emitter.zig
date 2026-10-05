@@ -2,25 +2,28 @@
 const std = @import("std");
 const resolved = @import("model/resolved.zig");
 
-pub const Error = std.Io.Writer.Error || error{NullablePrimaryKey};
+pub const Error = std.Io.Writer.Error || error{ NullablePrimaryKey, InvalidIdReuse };
 
 /// Emit tables and columns in schema order. Zero-column tables remain skeletons,
 /// not executable SQLite SQL. Relationships are virtual and produce no SQL.
-/// Nullable primary keys are rejected before writing. Writer failures may leave
+/// Invalid primary keys and ID reuse options are rejected before writing. Writer failures may leave
 /// partial output. The caller owns and flushes the writer.
 pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
     for (schema.tables) |table| {
+        const key_count = primaryKeyCount(table);
         for (table.columns) |column| {
-            if (column.primary_key and column.nullable) return error.NullablePrimaryKey;
+            if (column.primary_key != .none and column.nullable) return error.NullablePrimaryKey;
+            if (column.primary_key == .allow_reuse and
+                (column.type != .integer or key_count != 1))
+            {
+                return error.InvalidIdReuse;
+            }
         }
     }
 
     try writer.writeAll("PRAGMA foreign_keys = ON;\n");
     for (schema.tables) |table| {
-        var key_count: usize = 0;
-        for (table.columns) |column| {
-            if (column.primary_key) key_count += 1;
-        }
+        const key_count = primaryKeyCount(table);
 
         try writer.writeAll("\nCREATE TABLE ");
         try writeIdentifier(writer, table.sql_name);
@@ -35,11 +38,12 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
                 .text => "TEXT",
                 .blob => "BLOB",
             });
-            if (column.primary_key and key_count == 1 and column.type == .integer) {
-                try writer.writeAll(" PRIMARY KEY AUTOINCREMENT");
+            if (column.primary_key != .none and key_count == 1 and column.type == .integer) {
+                try writer.writeAll(" PRIMARY KEY");
+                if (column.primary_key == .standard) try writer.writeAll(" AUTOINCREMENT");
             } else {
                 if (!column.nullable) try writer.writeAll(" NOT NULL");
-                if (column.primary_key and key_count == 1) try writer.writeAll(" PRIMARY KEY");
+                if (column.primary_key != .none and key_count == 1) try writer.writeAll(" PRIMARY KEY");
             }
             if (index + 1 < table.columns.len or key_count > 1) try writer.writeByte(',');
             try writer.writeByte('\n');
@@ -48,7 +52,7 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
             try writer.writeAll("  PRIMARY KEY (");
             var first = true;
             for (table.columns) |column| {
-                if (!column.primary_key) continue;
+                if (column.primary_key == .none) continue;
                 if (!first) try writer.writeAll(", ");
                 try writeIdentifier(writer, column.sql_name);
                 first = false;
@@ -57,6 +61,14 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
         }
         try writer.writeAll(") STRICT;\n");
     }
+}
+
+fn primaryKeyCount(table: resolved.Table) usize {
+    var count: usize = 0;
+    for (table.columns) |column| {
+        if (column.primary_key != .none) count += 1;
+    }
+    return count;
 }
 
 fn writeIdentifier(writer: *std.Io.Writer, name: []const u8) std.Io.Writer.Error!void {
@@ -155,7 +167,7 @@ test "single integer primary key generates IDs" {
         .dsl_name = "Book",
         .sql_name = "book",
         .columns = &.{
-            .{ .dsl_name = "id", .sql_name = "id", .type = .integer, .primary_key = true },
+            .{ .dsl_name = "id", .sql_name = "id", .type = .integer, .primary_key = .standard },
             .{ .dsl_name = "title", .sql_name = "title", .type = .text },
         },
     }} }, &output.writer);
@@ -172,7 +184,7 @@ test "non-integer primary keys are required and do not generate IDs" {
         try emit(.{ .tables = &.{.{
             .dsl_name = "Entry",
             .sql_name = "entry",
-            .columns = &.{.{ .dsl_name = "key", .sql_name = "key", .type = storage_type, .primary_key = true }},
+            .columns = &.{.{ .dsl_name = "key", .sql_name = "key", .type = storage_type, .primary_key = .standard }},
         }} }, &output.writer);
         const expected = switch (storage_type) {
             .text => @embedFile("testdata/emitter/text_primary_key.expect.sql"),
@@ -192,9 +204,9 @@ test "composite primary key preserves column order and quotes SQL names" {
         .dsl_name = "Entry",
         .sql_name = "entry",
         .columns = &.{
-            .{ .dsl_name = "tenantId", .sql_name = "tenant\"id", .type = .integer, .primary_key = true },
+            .{ .dsl_name = "tenantId", .sql_name = "tenant\"id", .type = .integer, .primary_key = .standard },
             .{ .dsl_name = "value", .sql_name = "value", .type = .text },
-            .{ .dsl_name = "key", .sql_name = "select", .type = .text, .primary_key = true },
+            .{ .dsl_name = "key", .sql_name = "select", .type = .text, .primary_key = .standard },
         },
     }} }, &output.writer);
     try std.testing.expectEqualStrings(
@@ -204,17 +216,82 @@ test "composite primary key preserves column order and quotes SQL names" {
 }
 
 test "nullable primary keys fail before writing any table" {
-    for ([_]bool{ false, true }) |composite| {
+    for ([_]resolved.PrimaryKey{ .standard, .allow_reuse }) |primary_key| {
+        for ([_]bool{ false, true }) |composite| {
+            var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+            defer output.deinit();
+            try std.testing.expectError(error.NullablePrimaryKey, emit(.{ .tables = &.{
+                .{ .dsl_name = "Valid", .sql_name = "valid" },
+                .{
+                    .dsl_name = "Invalid",
+                    .sql_name = "invalid",
+                    .columns = &.{
+                        .{ .dsl_name = "id", .sql_name = "id", .type = .integer, .primary_key = primary_key, .nullable = true },
+                        .{ .dsl_name = "other", .sql_name = "other", .type = .text, .primary_key = if (composite) .standard else .none },
+                    },
+                },
+            } }, &output.writer));
+            try std.testing.expectEqualStrings("", output.written());
+        }
+    }
+}
+
+test "integer primary keys with and without ID reuse" {
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    try emit(.{ .tables = &.{
+        .{
+            .dsl_name = "Book",
+            .sql_name = "book",
+            .columns = &.{
+                .{ .dsl_name = "id", .sql_name = "id", .type = .integer, .primary_key = .allow_reuse },
+                .{ .dsl_name = "title", .sql_name = "title", .type = .text },
+            },
+        },
+        .{
+            .dsl_name = "Author",
+            .sql_name = "author",
+            .columns = &.{
+                .{ .dsl_name = "id", .sql_name = "id", .type = .integer, .primary_key = .standard },
+                .{ .dsl_name = "name", .sql_name = "name", .type = .text },
+            },
+        },
+    } }, &output.writer);
+    try std.testing.expectEqualStrings(
+        @embedFile("testdata/emitter/allow_id_reuse.expect.sql"),
+        output.written(),
+    );
+}
+
+test "ID reuse on non-integer primary keys fails before writing" {
+    for ([_]resolved.StorageType{ .text, .real, .blob }) |storage_type| {
         var output = std.Io.Writer.Allocating.init(std.testing.allocator);
         defer output.deinit();
-        try std.testing.expectError(error.NullablePrimaryKey, emit(.{ .tables = &.{
+        try std.testing.expectError(error.InvalidIdReuse, emit(.{ .tables = &.{
+            .{ .dsl_name = "Valid", .sql_name = "valid" },
+            .{
+                .dsl_name = "Invalid",
+                .sql_name = "invalid",
+                .columns = &.{.{ .dsl_name = "id", .sql_name = "id", .type = storage_type, .primary_key = .allow_reuse }},
+            },
+        } }, &output.writer));
+        try std.testing.expectEqualStrings("", output.written());
+    }
+}
+
+test "ID reuse on either composite key component fails before writing" {
+    for (0..2) |reuse_index| {
+        var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+        defer output.deinit();
+        try std.testing.expectError(error.InvalidIdReuse, emit(.{ .tables = &.{
             .{ .dsl_name = "Valid", .sql_name = "valid" },
             .{
                 .dsl_name = "Invalid",
                 .sql_name = "invalid",
                 .columns = &.{
-                    .{ .dsl_name = "id", .sql_name = "id", .type = .integer, .primary_key = true, .nullable = true },
-                    .{ .dsl_name = "other", .sql_name = "other", .type = .text, .primary_key = composite },
+                    .{ .dsl_name = "first", .sql_name = "first", .type = .integer, .primary_key = if (reuse_index == 0) .allow_reuse else .standard },
+                    .{ .dsl_name = "second", .sql_name = "second", .type = .integer, .primary_key = if (reuse_index == 1) .allow_reuse else .standard },
                 },
             },
         } }, &output.writer));
