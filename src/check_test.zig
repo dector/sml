@@ -7,6 +7,7 @@ const resolved = @import("model/resolved.zig");
 
 test {
     _ = @import("check_extra_test.zig");
+    _ = @import("table_check_test.zig");
 }
 
 fn pipeline(allocator: std.mem.Allocator) !void {
@@ -63,8 +64,7 @@ fn rejectSyntax(source: []const u8, offending: []const u8, message: []const u8) 
 }
 
 test "field check scope, docs, body options, terminators and EOF diagnostics" {
-    try rejectSyntax("T {\n?? true\n}\n", "?", "field-only");
-    try rejectSyntax("T {\n#check true\n}\n", "check", "field-only");
+    try rejectSyntax("T {\n? true\n}\n", "?", "field scope");
     try rejectSyntax("T {\na int {\n?? true\n}\n}\n", "?", "Table checks");
     try rejectSyntax("T {\na int {\n#check {\n}\n}\n}\n", "{", "Named check bodies");
     try rejectSyntax("T {\na int {\n#check _ > 0 {\n}\n}\n}\n", "{", "Named check bodies");
@@ -110,15 +110,16 @@ test "field checks semantic failures retain expression spans and messages" {
     try std.testing.checkAllAllocationFailures(backing.allocator(), semanticFailure, .{});
 }
 
-test "manually built table checks fail resolution" {
+test "manually built table checks resolve without columns" {
     const span: parsed.Span = .{ .start = 0, .end = 1 };
-    const result = try resolver.resolve(std.testing.allocator, .{ .tables = &.{.{
+    var result = try resolver.resolve(std.testing.allocator, .{ .tables = &.{.{
         .name = .{ .text = "T", .span = span },
         .span = span,
         .directives = &.{.{ .span = span, .kind = .{ .check = .{ .span = span, .kind = .{ .boolean = .{ .text = "true", .span = span } } } } }},
     }} });
-    try std.testing.expect(result == .diagnostic);
-    try std.testing.expectEqual(resolver.Category.invalid_directive_scope, result.diagnostic.category);
+    try std.testing.expect(result == .schema);
+    defer result.schema.deinit();
+    try std.testing.expectEqual(@as(usize, 1), result.schema.schema.tables[0].checks.len);
 }
 
 test "schema emitter preflights every check before any SQL" {

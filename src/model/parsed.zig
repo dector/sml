@@ -103,7 +103,7 @@ pub const Directive = struct {
     kind: union(enum) {
         name: Token,
         allow_reuse,
-        /// Field-body `? expr` or `#check expr`.
+        /// Field `? expr`, table `?? expr`, or either scope's `#check expr`.
         check: Expression,
         /// Contextual enum values; keep spelling and source order.
         of: []const Token,

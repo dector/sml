@@ -9,8 +9,9 @@ const expression_emitter = @import("expression_emitter.zig");
 
 pub const Error = expression_emitter.Error || error{ NullablePrimaryKey, InvalidPrimaryKey, InvalidIdReuse, InvalidDefault, InvalidEnum, DefaultOnAutoPrimaryKey, InvalidCheck };
 
-/// Emit tables and columns in schema order. Zero-column tables remain skeletons,
-/// not executable SQLite SQL. Relationships are virtual and produce no SQL.
+/// Emit tables and columns in schema order, then ordered table CHECK items.
+/// Zero-column tables (even checks-only tables) remain non-executable skeletons.
+/// Relationships are virtual and produce no SQL.
 /// NUL-containing SQL names, invalid primary keys, ID reuse options, and literal
 /// defaults and enum metadata are rejected before writing. Raw SQL is trusted
 /// and not syntax-validated, including direct resolved enum raw-SQL defaults.
@@ -19,6 +20,10 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
     for (schema.tables) |table| {
         if (std.mem.indexOfScalar(u8, table.sql_name, 0) != null) return error.InvalidIdentifier;
         const key_count = primaryKeyCount(table);
+        for (table.checks) |check| {
+            try expression_emitter.preflight(check);
+            if (@import("expression_resolver.zig").validateCheckResult(&check) != null) return error.InvalidCheck;
+        }
         for (table.columns) |column| {
             if (std.mem.indexOfScalar(u8, column.sql_name, 0) != null) return error.InvalidIdentifier;
             if (column.primary_key != .none and column.nullable) return error.NullablePrimaryKey;
@@ -103,7 +108,7 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
                 try expression_emitter.emit(check, writer);
                 try writer.writeByte(')');
             }
-            if (index + 1 < table.columns.len or key_count > 1) try writer.writeByte(',');
+            if (index + 1 < table.columns.len or key_count > 1 or table.checks.len > 0) try writer.writeByte(',');
             try writer.writeByte('\n');
         }
         if (key_count > 1) {
@@ -115,7 +120,16 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
                 try writeIdentifier(writer, column.sql_name);
                 first = false;
             }
-            try writer.writeAll(")\n");
+            try writer.writeByte(')');
+            if (table.checks.len > 0) try writer.writeByte(',');
+            try writer.writeByte('\n');
+        }
+        for (table.checks, 0..) |check, index| {
+            try writer.writeAll("  CHECK (");
+            try expression_emitter.emit(check, writer);
+            try writer.writeByte(')');
+            if (index + 1 < table.checks.len) try writer.writeByte(',');
+            try writer.writeByte('\n');
         }
         try writer.writeAll(") STRICT;\n");
     }

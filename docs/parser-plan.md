@@ -2,8 +2,8 @@
 
 Status: the first supported parser milestone (stages 1–4) is implemented and
 covered by tokenizer, parser, allocation-failure, and source-to-SQL tests.
-Stage 5 is partially implemented through Slice12 field checks; table checks,
-named check bodies, uniqueness, and indexes remain future work. Unsupported
+Stage 5 is partially implemented through Slice13 table checks;
+named check bodies, constraint names, uniqueness, and indexes remain future work. Unsupported
 syntax is diagnosed rather than ignored.
 See [the language design](design-v1.md) for broader v1 scope.
 
@@ -80,11 +80,27 @@ Resolved columns own an ordered `checks` expression array in the schema arena.
 The emitter preflights all expressions and roots before any SQL; explicit checks
 follow builtin enum/bool/datetime checks and preserve their source order.
 `_ != null` emits `IS NOT NULL`; ordinary nullable comparisons retain SQL UNKNOWN.
-Table `??`/`#check` and named check bodies receive explicit unsupported diagnostics.
+Named check bodies and constraint names remain unsupported.
 Tests: `src/check_test.zig`, `src/check_extra_test.zig`, `checks.pzl`/SQL fixture,
 and `src/testdata/check_runtime_test.py`.
 
-Other generators, date/JSON, table checks, indexes, FKs, relationships, and
+Slice13 table checks are implemented end-to-end: direct table `?? expr` and
+`#check expr` can precede or follow fields. Parsed directives retain check payloads
+and source order. Resolution runs after all columns are known, with
+`expression_resolver.Context { .table = table, .field_index = null }`:
+DSL names resolve to final SQL names (including quoted `#name` overrides),
+forward references work, and `_` is invalid. The same Boolean/raw-SQL root,
+logical datatype, canonical UTC datetime, and null semantics apply as for fields.
+Single table `?` and field `??` fail with marker-span diagnostics. Docs cannot
+attach to checks. `resolved.Table.checks` owns ordered expressions; emission
+preflights every check before writing, then emits table CHECK items after columns
+and any composite primary key with proper commas. Zero-column tables, including
+literal checks-only tables, retain the existing non-executable skeleton policy;
+unknown field references still fail resolution. Tests: `src/table_check_test.zig`,
+`table_checks.pzl`/SQL fixture, and `src/testdata/table_check_runtime_test.py`
+(INSERT and UPDATE enforcement). Field-check coverage remains intact.
+
+Other generators, date/JSON, indexes, FKs, relationships, and
 connections come in later slices. Reusable types are deferred indefinitely.
 Numeric exponent notation and multiline literals are deferred.
 
@@ -297,7 +313,7 @@ Extend syntax models, parser, resolver, emitter, and tests together:
 
 1. Additional defaults and date/JSON types. Inline enums are complete;
    reusable types remain deferred indefinitely.
-2. Table checks, named check bodies, uniqueness, and indexes (expression precedence and field checks are implemented).
+2. Named check bodies, constraint names, uniqueness, and indexes (expression precedence, field checks, and table checks are implemented).
 3. Stored FKs and virtual relationships.
 4. Named/unnamed connections, roles, generated keys, and destination hints.
 5. Remaining directives and multiline literals after their rules are finalized.

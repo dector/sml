@@ -269,14 +269,17 @@ const Parser = struct {
     fn directive(self: *Parser, field_scope: bool) Error!parsed.Directive {
         if (self.current.kind == .question) {
             const marker = self.current;
-            if (!field_scope) return self.fail(marker.span, "Checks are field-only; table checks are not supported yet");
             try self.advance();
-            if (self.current.kind == .question) return self.fail(self.current.span, "Table checks (??) are not supported yet; use ? expr in a field body");
+            if (field_scope) {
+                if (self.current.kind == .question) return self.fail(self.current.span, "Table checks (??) require table scope; use ? expr in a field body");
+            } else {
+                if (self.current.kind != .question) return self.fail(marker.span, "Field checks (?) require field scope; use ?? expr in a table body");
+                try self.advance();
+            }
             return self.check(marker.span.start);
         }
         const hash = try self.take(.hash, "Expected supported field directive or ? expression");
         if (self.word("check")) {
-            if (!field_scope) return self.fail(self.current.span, "#check is field-only; table checks are not supported yet");
             try self.advance();
             if (self.current.kind == .l_brace) return self.fail(self.current.span, "Named check bodies are not supported yet; use #check expr");
             return self.check(hash.span.start);

@@ -18,6 +18,8 @@ pub const Table = struct {
     documentation: ?Documentation = null,
     sql_name: []const u8,
     columns: []const Column = &.{},
+    /// Explicit table checks in directive source order.
+    checks: []const Expression = &.{},
 };
 
 /// Logical column types. Boolean uses INTEGER; datetime and enumeration use TEXT.

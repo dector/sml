@@ -80,9 +80,7 @@ const Context = struct {
                 if (result.name != null) return self.fail(.duplicate_directive, directive.span, "duplicate #name directive");
                 result.name = token;
             },
-            .check => {
-                if (table) return self.fail(.invalid_directive_scope, directive.span, "checks are field-only; table checks are not supported yet");
-            },
+            .check => {},
             .of => {
                 if (table) return self.fail(.invalid_directive_scope, directive.span, "#of is field-only");
             },
@@ -212,6 +210,19 @@ const Context = struct {
                 }
                 columns[j].checks = try checks.toOwnedSlice(self.allocator);
             }
+            var checks: std.ArrayList(resolved.Expression) = .empty;
+            for (table.directives) |directive| {
+                if (directive.kind != .check) continue;
+                const result = try expression_resolver.resolveInto(self.allocator, directive.kind.check, .{ .table = tables[i], .field_index = null });
+                const expression = switch (result) {
+                    .expression => |expression| expression,
+                    .diagnostic => |d| return self.fail(.invalid_check, d.span, d.message),
+                };
+                if (expression_resolver.validateCheckResult(&expression)) |d|
+                    return self.fail(.invalid_check, d.span, d.message);
+                try checks.append(self.allocator, expression);
+            }
+            tables[i].checks = try checks.toOwnedSlice(self.allocator);
         }
         return .{ .tables = tables };
     }

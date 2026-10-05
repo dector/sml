@@ -42,8 +42,14 @@ refer to other SQL columns, but `_` is not substituted within it. Roots must be
 Boolean or trusted raw SQL. Nullable Boolean UNKNOWN passes SQLite CHECK;
 use `_ != null` to explicitly reject NULL, or a nonnullable field for NOT NULL.
 Explicit checks preserve source order and coexist with builtin type checks.
-Docs cannot target checks. Table checks (`??`/table `#check`), named check bodies,
-unique constraints, and indexes are not supported yet.
+Table bodies support `?? expr` and `#check expr` anywhere among direct items,
+including before fields. References use DSL field names, even with `#name` SQL
+overrides, and can target fields declared later; `_` is invalid in table scope.
+Single `?` is field-only; `??` is table-only. Table checks emit after columns and
+any composite primary key, in check source order. Empty tables (including
+checks-only tables) remain non-executable SQL skeletons.
+Docs cannot target checks. Named check bodies, constraint names, unique
+constraints, and indexes are not supported yet.
 Unsupported later-v1 syntax returns a diagnostic.
 
 `expression_parser.parse(allocator, source)` separately parses one literal,
@@ -62,7 +68,7 @@ inside parentheses; indentation there is only formatting (leading tabs still fai
 Bare line continuations, dotted names, hyphenated enum references, single `|` pipe
 bodies, and arithmetic are not supported; negative numeric literals remain valid.
 References are not resolved, reusable types are deferred indefinitely, and this API
-does not extend schema defaults; field checks use the same stream parser.
+does not extend schema defaults; field and table checks use the same stream parser.
 
 `expression_resolver.resolve(allocator, expression, context)` owns its resolved
 result and permits scalar roots. For CHECKs, also call
