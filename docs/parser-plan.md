@@ -2,7 +2,7 @@
 
 Status: the first supported parser milestone (stages 1–4) is implemented and
 covered by tokenizer, parser, allocation-failure, and source-to-SQL tests.
-Stage 5 is partially implemented through Slice15 table/composite native uniqueness.
+Stage 5 is partially implemented through Slice16 ordinary indexes.
 `? unique` / `#check unique` preserve a native_unique payload with empty field
 references and ordered, spanned options. Same-line brace options support exact
 backtick #name only; duplicates are preserved for resolver diagnostics.
@@ -16,8 +16,20 @@ One or more stored fields are required. Repeated references and duplicate sets
 (including reversed lists and field/table singleton duplicates) are rejected.
 The emitter validates indices and names before output and writes ordered,
 quoted table UNIQUE items after PKs/checks. Plain NULLs remain distinct.
-`unique(nulls: equal)`, named checks, and indexes remain deferred. Unsupported
-syntax is diagnosed rather than ignored.
+Slice16 supports field `#index` and table `#index a, b`, with forward DSL
+references and ordered column indices in owned resolved.Table.indexes.
+Optional same-line braced options accept only exact backtick/hash-backtick
+`#name`; empty `{}` works, duplicate names retain spans and are rejected later.
+Nested braced indexes in `=` field bodies use free brace indentation but exact
++2 sibling indentation. Docs cannot attach to indexes or options.
+Default names are `{table_sql_name}_{column_sql_names_joined_by_underscore}_idx`.
+Names are nonempty/NUL-free; all tables/indexes share an ASCII-case-insensitive
+namespace including later declarations. Index `sqlite_` prefixes are reserved.
+No suffixing: repeated column lists need distinct explicit names, repeated
+columns fail. UNIQUE labels remain table-local and separate. Whole-schema
+preflight validates manual resolved input before writing all tables then indexes.
+`unique(nulls: equal)`, named checks, index `#unique`/`#where`, and expression
+indexes remain deferred. Unsupported syntax is diagnosed rather than ignored.
 See [the language design](design-v1.md) for broader v1 scope.
 
 ## Goal and first milestone
@@ -113,7 +125,7 @@ unknown field references still fail resolution. Tests: `src/table_check_test.zig
 `table_checks.pzl`/SQL fixture, and `src/testdata/table_check_runtime_test.py`
 (INSERT and UPDATE enforcement). Field-check coverage remains intact.
 
-Other generators, date/JSON, indexes, FKs, relationships, and
+Other generators, date/JSON, partial/expression indexes, FKs, relationships, and
 connections come in later slices. Reusable types are deferred indefinitely.
 Numeric exponent notation and multiline literals are deferred.
 
@@ -326,7 +338,9 @@ Extend syntax models, parser, resolver, emitter, and tests together:
 
 1. Additional defaults and date/JSON types. Inline enums are complete;
    reusable types remain deferred indefinitely.
-2. Nulls-equal, named check bodies, and indexes (composite uniqueness, expression precedence, field checks, and table checks are implemented).
+2. Nulls-equal, named check bodies, and partial indexes (ordinary indexes,
+   composite uniqueness, expression precedence, field checks, and table checks
+   are implemented; expression indexes are not supported).
 3. Stored FKs and virtual relationships.
 4. Named/unnamed connections, roles, generated keys, and destination hints.
 5. Remaining directives and multiline literals after their rules are finalized.

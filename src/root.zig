@@ -26,4 +26,5 @@ test {
     _ = @import("enum_test.zig");
     _ = @import("check_test.zig");
     _ = @import("unique_test.zig");
+    _ = @import("index_test.zig");
 }

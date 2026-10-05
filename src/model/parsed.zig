@@ -105,10 +105,16 @@ pub const NativeUnique = struct {
     options: []const Directive = &.{},
 };
 
+pub const Index = struct {
+    fields: []const Token = &.{},
+    options: []const Directive = &.{},
+};
+
 pub const Directive = struct {
     kind: union(enum) {
         name: Token,
         native_unique: NativeUnique,
+        index: Index,
         allow_reuse,
         /// Field `? expr`, table `?? expr`, or either scope's `#check expr`.
         check: Expression,

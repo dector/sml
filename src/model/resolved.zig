@@ -19,6 +19,7 @@ pub const Table = struct {
     sql_name: []const u8,
     columns: []const Column = &.{},
     unique_constraints: []const UniqueConstraint = &.{},
+    indexes: []const Index = &.{},
     /// Explicit table checks in directive source order.
     checks: []const Expression = &.{},
 };
@@ -55,6 +56,12 @@ pub const Default = union(enum) {
     blob: []const u8,
     null_value,
     raw_sql: []const u8,
+};
+
+/// Ordinary indexes own ordered column indices and their exact SQL name.
+pub const Index = struct {
+    columns: []const usize,
+    sql_name: []const u8,
 };
 
 pub const UniqueConstraint = struct {

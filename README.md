@@ -60,7 +60,24 @@ references and SQL `#name` overrides. SQL preserves the field list order.
 Repeated fields, duplicate field sets (even reversed or field/table singletons),
 and duplicate options are diagnosed. Table constraints follow PKs/checks.
 Plain uniqueness allows multiple NULLs, including composite NULL components.
-`unique(nulls: equal)`, named checks, and indexes remain explicitly deferred.
+`unique(nulls: equal)` and named checks remain explicitly deferred.
+
+Ordinary indexes support field `#index` (no arguments) and table
+`#index fieldA, fieldB` (one or more DSL names, no trailing comma).
+Forward references work; SQL preserves listed column order. Optional same-line
+braces accept only exact backtick/hash-backtick `#name`, including empty `{}`.
+Nested braced indexes work inside `=` field bodies; brace indentation is free,
+but following siblings must return to exactly declaration indentation + 2.
+Docs cannot target indexes or their options. `#unique`, `#where`, and expression
+indexes are unsupported. Default names are
+`{table_sql_name}_{column_sql_names_joined_by_underscore}_idx`.
+Names are safely quoted, nonempty and NUL-free. Index names must be distinct
+ASCII-case-insensitively across all tables and indexes, including later tables;
+`sqlite_` prefixes are reserved for indexes. No numeric suffixes are added.
+Repeated columns are rejected; repeated lists need distinct explicit `#name`
+options. UNIQUE constraint names remain a separate table-local namespace.
+SQL emits all CREATE TABLE statements before CREATE INDEX statements and
+preflights the whole schema before writing.
 Ordinary expressions such as `? unique == 'x'` still parse `unique` as an identifier.
 Unsupported later-v1 syntax returns a diagnostic.
 

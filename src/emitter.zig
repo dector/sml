@@ -7,7 +7,7 @@ const writeBlob = sql_writer.writeBlob;
 const resolved = @import("model/resolved.zig");
 const expression_emitter = @import("expression_emitter.zig");
 
-pub const Error = expression_emitter.Error || error{ NullablePrimaryKey, InvalidPrimaryKey, InvalidIdReuse, InvalidDefault, InvalidEnum, DefaultOnAutoPrimaryKey, InvalidCheck, InvalidUnique };
+pub const Error = expression_emitter.Error || error{ NullablePrimaryKey, InvalidPrimaryKey, InvalidIdReuse, InvalidDefault, InvalidEnum, DefaultOnAutoPrimaryKey, InvalidCheck, InvalidUnique, InvalidIndex, SqlNameCollision };
 
 /// Emit tables and columns in schema order, then ordered table CHECK items.
 /// Zero-column tables (even checks-only tables) remain non-executable skeletons.
@@ -17,7 +17,26 @@ pub const Error = expression_emitter.Error || error{ NullablePrimaryKey, Invalid
 /// and not syntax-validated, including direct resolved enum raw-SQL defaults.
 /// Writer failures may leave partial output. The caller owns and flushes the writer.
 pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
-    for (schema.tables) |table| {
+    for (schema.tables, 0..) |table, table_index| {
+        for (schema.tables[0..table_index]) |prior| {
+            if (std.ascii.eqlIgnoreCase(table.sql_name, prior.sql_name)) return error.SqlNameCollision;
+        }
+        for (table.indexes, 0..) |index, n| {
+            if (index.sql_name.len == 0 or std.mem.indexOfScalar(u8, index.sql_name, 0) != null) return error.InvalidIdentifier;
+            if (std.ascii.startsWithIgnoreCase(index.sql_name, "sqlite_") or index.columns.len == 0) return error.InvalidIndex;
+            for (index.columns, 0..) |column, k| {
+                if (column >= table.columns.len or std.mem.indexOfScalar(usize, index.columns[0..k], column) != null) return error.InvalidIndex;
+            }
+            for (schema.tables) |other| {
+                if (std.ascii.eqlIgnoreCase(index.sql_name, other.sql_name)) return error.SqlNameCollision;
+            }
+            for (schema.tables[0..table_index]) |other| for (other.indexes) |prior| {
+                if (std.ascii.eqlIgnoreCase(index.sql_name, prior.sql_name)) return error.SqlNameCollision;
+            };
+            for (table.indexes[0..n]) |prior| {
+                if (std.ascii.eqlIgnoreCase(index.sql_name, prior.sql_name)) return error.SqlNameCollision;
+            }
+        }
         if (table.sql_name.len == 0 or std.mem.indexOfScalar(u8, table.sql_name, 0) != null) return error.InvalidIdentifier;
         const key_count = primaryKeyCount(table);
         for (table.unique_constraints, 0..) |unique, n| {
@@ -55,6 +74,9 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
                 }
             }
             if (column.sql_name.len == 0 or std.mem.indexOfScalar(u8, column.sql_name, 0) != null) return error.InvalidIdentifier;
+            for (table.columns[0..column_index]) |previous| {
+                if (std.ascii.eqlIgnoreCase(column.sql_name, previous.sql_name)) return error.SqlNameCollision;
+            }
             if (column.primary_key != .none and column.nullable) return error.NullablePrimaryKey;
             if (column.primary_key != .none and column.type == .boolean) return error.InvalidPrimaryKey;
             if (column.primary_key == .allow_reuse and
@@ -185,6 +207,18 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
         }
         try writer.writeAll(") STRICT;\n");
     }
+    for (schema.tables) |table| for (table.indexes) |index| {
+        try writer.writeAll("\nCREATE INDEX ");
+        try writeIdentifier(writer, index.sql_name);
+        try writer.writeAll(" ON ");
+        try writeIdentifier(writer, table.sql_name);
+        try writer.writeAll(" (");
+        for (index.columns, 0..) |column, n| {
+            if (n != 0) try writer.writeAll(", ");
+            try writeIdentifier(writer, table.columns[column].sql_name);
+        }
+        try writer.writeAll(");\n");
+    };
 }
 
 /// Prefix every physical line, including CR-separated lines, so docs cannot

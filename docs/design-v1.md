@@ -291,8 +291,9 @@ letter followed by lowercase. Then ASCII letters are lowercased: `HTTPServer`
 becomes `http_server`, `URLValue` becomes `url_value`, and `tenantId` becomes
 `tenant_id`. Existing underscores are preserved.
 
-**Open naming details:** generated index/trigger names and explicit naming of a
-primary-key constraint need final rules. Hash-delimited backticks support embedded
+**Open naming details:** generated trigger names and explicit naming of a
+primary-key constraint need final rules. Ordinary index naming is settled in
+section 17. Hash-delimited backticks support embedded
 backticks (see section 8) in the parser and resolver.
 
 ## 6. Built-in types and nullability
@@ -1486,7 +1487,22 @@ title str =
 #index publisherId, publishedAt
 ```
 
-The listed order is the indexed column order.
+Slice16 implements ordinary stored-column indexes only. Table lists require
+at least one DSL field name, with commas and no trailing comma. Forward
+references resolve after all column names; the listed order is the indexed
+column order. Repeated columns in one index are errors. Expression indexes
+are not supported.
+
+Default SQL names are deterministic:
+`{table_sql_name}_{column_sql_names_joined_by_underscore}_idx`.
+Exact `#name` overrides this entirely. SQL identifier quoting supports spaces,
+quotes, and other wider SQL names. Names must be nonempty and NUL-free.
+All tables and indexes share an ASCII-case-insensitive namespace, including
+later declarations and generated/exact names. Collisions are errors, never
+silently suffixed. Repeated column lists require distinct explicit `#name`
+options. Index names starting with `sqlite_` (ASCII case-insensitive) are
+reserved. Existing table reserved-prefix behavior is unchanged. Named UNIQUE
+constraints remain table-local labels, not index names.
 
 ### Named index
 
@@ -1505,9 +1521,17 @@ title str =
   }
 ```
 
-Index option scopes require braces. No `as` naming or `#index =` form is supported.
+Index option scopes require braces, opened on the directive line. Empty `{}`
+is allowed; nonempty bodies close on their own line. Only exact backtick or
+hash-delimited backtick `#name` is supported. Duplicate options are preserved
+in syntax and rejected in resolution. Documentation cannot target directives
+or options. No `as` naming or `#index =` form is supported. Nested braces inside
+`=` field bodies have independent indentation; following siblings return to
+exactly declaration indentation + 2. The resolved table owns index column
+indices and SQL names. Emission preflights all names, columns, and collisions
+before writing, then emits CREATE INDEX after all CREATE TABLE statements.
 
-### Partial indexes
+### Partial indexes (deferred; unsupported in Slice16)
 
 ```text
 #index title {
@@ -1525,7 +1549,7 @@ Index option scopes require braces. No `as` naming or `#index =` form is support
 SQLite's own partial-index restrictions still apply. For example, predicates
 cannot depend on subqueries or nondeterministic functions.
 
-### Unique partial indexes
+### Unique partial indexes (deferred; unsupported in Slice16)
 
 ```text
 #index email {
@@ -1538,7 +1562,8 @@ Only indexed rows participate in uniqueness. This can enforce unique emails amon
 active rows while permitting duplicates among deleted rows.
 
 `#index` is separate from `#check`: indexes are not validation checks. `#unique`
-is an index option; native `? unique` remains available for ordinary uniqueness.
+is a future index option; both `#unique` and `#where` are explicitly unsupported
+in Slice16. Native `? unique` remains available for ordinary uniqueness.
 
 ## 18. Dates, timestamps, and timezones
 

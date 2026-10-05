@@ -26,6 +26,7 @@ pub const Category = enum {
     unsupported_multiline,
     invalid_check,
     invalid_unique,
+    invalid_index,
 };
 
 pub const Diagnostic = struct {
@@ -82,7 +83,7 @@ const Context = struct {
                 result.name = token;
             },
             .check => {},
-            .native_unique => {},
+            .native_unique, .index => {},
             .of => {
                 if (table) return self.fail(.invalid_directive_scope, directive.span, "#of is field-only");
             },
@@ -282,7 +283,61 @@ const Context = struct {
             }
             tables[i].checks = try checks.toOwnedSlice(self.allocator);
         }
+        // Resolve indexes only after all table/column names are final, including
+        // later declarations. Constraint names are deliberately not global.
+        for (input.tables, 0..) |table, i| {
+            var indexes: std.ArrayList(resolved.Index) = .empty;
+            for (table.fields, 0..) |field, j| for (field.directives) |directive| {
+                if (directive.kind == .index) try indexes.append(self.allocator, try self.resolveIndex(directive, tables[i], j));
+            };
+            for (table.directives) |directive| {
+                if (directive.kind == .index) try indexes.append(self.allocator, try self.resolveIndex(directive, tables[i], null));
+            }
+            tables[i].indexes = try indexes.toOwnedSlice(self.allocator);
+            for (tables[i].indexes, 0..) |index, n| {
+                for (tables) |other| if (std.ascii.eqlIgnoreCase(index.sql_name, other.sql_name))
+                    return self.fail(.sql_name_collision, table.span, "SQL index and table names collide (ASCII case-insensitive)");
+                for (tables[0..i]) |other| for (other.indexes) |prior| {
+                    if (std.ascii.eqlIgnoreCase(index.sql_name, prior.sql_name)) return self.fail(.sql_name_collision, table.span, "SQL index names collide; specify distinct #name options");
+                };
+                for (tables[i].indexes[0..n]) |prior| {
+                    if (std.ascii.eqlIgnoreCase(index.sql_name, prior.sql_name)) return self.fail(.sql_name_collision, table.span, "SQL index names collide; specify distinct #name options");
+                }
+            }
+        }
         return .{ .tables = tables };
+    }
+
+    fn resolveIndex(self: *Context, directive: parsed.Directive, table: resolved.Table, field: ?usize) Error!resolved.Index {
+        const payload = directive.kind.index;
+        if (field != null and payload.fields.len != 0) return self.fail(.invalid_index, directive.span, "Field index cannot specify references");
+        if (field == null and payload.fields.len == 0) return self.fail(.invalid_index, directive.span, "Table index requires at least one field");
+        const columns = try self.allocator.alloc(usize, if (field != null) 1 else payload.fields.len);
+        if (field) |j| {
+            columns[0] = j;
+        } else for (payload.fields, 0..) |reference, n| {
+            const j = for (table.columns, 0..) |column, k| {
+                if (std.mem.eql(u8, column.dsl_name, reference.text)) break k;
+            } else return self.fail(.invalid_index, reference.span, "Unknown field in index");
+            for (columns[0..n]) |prior| if (prior == j) return self.fail(.invalid_index, reference.span, "Repeated field in index");
+            columns[n] = j;
+        }
+        var override: ?parsed.Token = null;
+        for (payload.options) |option| {
+            if (option.kind != .name) return self.fail(.invalid_index, option.span, "Only #name is supported in index options");
+            if (override != null) return self.fail(.duplicate_directive, option.span, "duplicate #name in index options");
+            override = option.kind.name;
+        }
+        var generated: std.ArrayList(u8) = .empty;
+        try generated.appendSlice(self.allocator, table.sql_name);
+        for (columns) |j| {
+            try generated.append(self.allocator, '_');
+            try generated.appendSlice(self.allocator, table.columns[j].sql_name);
+        }
+        try generated.appendSlice(self.allocator, "_idx");
+        const sql_name = if (override) |exact| try self.name(.{ .text = "", .span = directive.span }, exact) else try generated.toOwnedSlice(self.allocator);
+        if (std.ascii.startsWithIgnoreCase(sql_name, "sqlite_")) return self.fail(.invalid_identifier, if (override) |o| o.span else directive.span, "Index names beginning sqlite_ are reserved");
+        return .{ .columns = columns, .sql_name = sql_name };
     }
 
     fn documentation(self: *Context, docs: ?parsed.Documentation) Error!?resolved.Documentation {

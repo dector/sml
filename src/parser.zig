@@ -254,6 +254,41 @@ const Parser = struct {
         while (self.current.kind == .newline or self.current.kind == .comment) try self.advance();
     }
 
+    fn index(self: *Parser, start: usize, field_scope: bool) Error!parsed.Directive {
+        var end = self.current.span.end;
+        try self.advance();
+        var fields: std.ArrayList(parsed.Token) = .empty;
+        if (!field_scope) {
+            while (true) {
+                const reference = try self.name();
+                try fields.append(self.allocator, token(reference));
+                end = reference.span.end;
+                if (self.current.kind != .comma) break;
+                try self.advance();
+            }
+        }
+        var options: std.ArrayList(parsed.Directive) = .empty;
+        if (self.current.kind == .l_brace) {
+            try self.advance();
+            if (self.current.kind != .r_brace) {
+                try self.lineEnd();
+                while (true) {
+                    try self.noDocs(try self.trivia());
+                    if (self.current.kind == .r_brace) break;
+                    if (self.current.kind == .eof) return self.fail(self.current.span, "Expected '}' to close index options");
+                    const hash = try self.take(.hash, "Index options require #name backtick");
+                    if (!self.word("name")) return self.fail(self.current.span, "Only #name is supported in index options; #unique and #where are unsupported");
+                    try self.advance();
+                    const value = try self.take(.backtick, "#name requires a backtick literal");
+                    try options.append(self.allocator, .{ .kind = .{ .name = token(value) }, .span = .{ .start = hash.span.start, .end = value.span.end } });
+                    try self.lineEnd();
+                }
+            }
+            end = (try self.take(.r_brace, "Expected '}' to close index options")).span.end;
+        }
+        return .{ .kind = .{ .index = .{ .fields = try fields.toOwnedSlice(self.allocator), .options = try options.toOwnedSlice(self.allocator) } }, .span = .{ .start = start, .end = end } };
+    }
+
     fn unique(self: *Parser, start: usize, field_scope: bool) Error!parsed.Directive {
         var end = self.current.span.end;
         try self.advance();
@@ -333,6 +368,7 @@ const Parser = struct {
             return self.check(marker.span.start, field_scope);
         }
         const hash = try self.take(.hash, "Expected supported field directive or ? expression");
+        if (self.word("index")) return self.index(hash.span.start, field_scope);
         if (self.word("check")) {
             try self.advance();
             if (self.current.kind == .l_brace) return self.fail(self.current.span, "Named check bodies are not supported yet; use #check expr");
@@ -480,21 +516,21 @@ test "parser brace indentation is independent of indentation bodies" {
 
 test "parser rejects unsupported syntax, incomplete constructs and invalid scope rules" {
     const sources = [_][]const u8{
-        "T",                        "T {",                                      "T {\na",                            "T {\na int(",                                     "T {\na int(1",                      "T {\na int {",                    "T {\na int =",
-        "T\n{}",                    "T { a int }",                              "T {\na int }",                      "T {\na int b int\n}",                             "T {\na int {\n} =\n  #name `a`\n}", "T {\na int = {\n}\n}",            "T {\na int |\n  #name `a`\n}",
-        "T {\na int =\n}\n",        "T {\na int =\n -- wrong indentation\n}\n", "T {\na int =\n   #name `a`\n}\n",   "T {\na int =\n  #name `a`\n   #allow reuse\n}\n", "T {\n\ta int\n}\n",                 "--- unattached\n",                "--- detached\n\nT {}",
-        "T {\n--- unattached\n}\n", "T {\n--- directive docs\n#name `t`\n}\n",  "T {\na int =\n  --- doc-only\n}\n", "T {\na int --- inline\n}\n",                      "T {\n#allow reuse\n}\n",            "T {\na int {\n#index {}\n}\n}\n", "type Foo {}",
-        "enum Foo {}",              "T {\n_a int\n_ int\n}\n",                  "T {\ntrue int\n}\n",                "T {\na null\n}\n",                                "T {\na bool(TRUE)\n}\n",            "T {\na int(random())\n}\n",       "T {\na int(1 + 2)\n}\n",
-        "T {\na real(1e3)\n}\n",    "T {\na real(.5)\n}\n",                     "T {\na str(\"x\")\n}\n",            "T {\na str('multi\nline')\n}\n",                  "T {\n#name `unterminated\n}\n",     "T {\na int!\n}\n",                "T {\na int #name `a`\n}\n",
+        "T",                        "T {",                                      "T {\na",                            "T {\na int(",                                     "T {\na int(1",                      "T {\na int {",                               "T {\na int =",
+        "T\n{}",                    "T { a int }",                              "T {\na int }",                      "T {\na int b int\n}",                             "T {\na int {\n} =\n  #name `a`\n}", "T {\na int = {\n}\n}",                       "T {\na int |\n  #name `a`\n}",
+        "T {\na int =\n}\n",        "T {\na int =\n -- wrong indentation\n}\n", "T {\na int =\n   #name `a`\n}\n",   "T {\na int =\n  #name `a`\n   #allow reuse\n}\n", "T {\n\ta int\n}\n",                 "--- unattached\n",                           "--- detached\n\nT {}",
+        "T {\n--- unattached\n}\n", "T {\n--- directive docs\n#name `t`\n}\n",  "T {\na int =\n  --- doc-only\n}\n", "T {\na int --- inline\n}\n",                      "T {\n#allow reuse\n}\n",            "T {\na int {\n#index {\n#unique\n}\n}\n}\n", "type Foo {}",
+        "enum Foo {}",              "T {\n_a int\n_ int\n}\n",                  "T {\ntrue int\n}\n",                "T {\na null\n}\n",                                "T {\na bool(TRUE)\n}\n",            "T {\na int(random())\n}\n",                  "T {\na int(1 + 2)\n}\n",
+        "T {\na real(1e3)\n}\n",    "T {\na real(.5)\n}\n",                     "T {\na str(\"x\")\n}\n",            "T {\na str('multi\nline')\n}\n",                  "T {\n#name `unterminated\n}\n",     "T {\na int!\n}\n",                           "T {\na int #name `a`\n}\n",
         "T {\na int;\n}\n",
     };
     for (sources) |source| _ = try expectDiagnostic(source);
 }
 
 test "parser diagnostic spans identify exact offending tokens" {
-    const unsupported = "T {\n  a int {\n    #index {}\n  }\n}\n";
+    const unsupported = "T {\n  a int {\n    #where {}\n  }\n}\n";
     const d = try expectDiagnostic(unsupported);
-    try std.testing.expectEqualStrings("index", unsupported[d.span.start..d.span.end]);
+    try std.testing.expectEqualStrings("where", unsupported[d.span.start..d.span.end]);
     const misplaced = "T {\n a int =\n    #name `a`\n}\n";
     const indent = try expectDiagnostic(misplaced);
     try std.testing.expectEqualStrings("#", misplaced[indent.span.start..indent.span.end]);

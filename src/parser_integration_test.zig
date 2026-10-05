@@ -65,7 +65,7 @@ test "unsupported later slices never produce a partial schema" {
         "=> Label str\n",
         "Label {\n  value bool(::now)\n}\n",
         "Label {\n  value int(::now)\n}\n",
-        "Label {\n  value str =\n    #index {\n      #name `idx`\n    }\n}\n",
+        "Label {\n  value str =\n    #index {\n      #unique\n    }\n}\n",
         "Label {\n  *owner Owner\n}\n",
         "Label {\n  ~owners Owner[]\n}\n",
         "~Membership(Owner, Label) {}\n",
