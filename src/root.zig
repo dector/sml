@@ -6,6 +6,7 @@ pub const tokenizer = @import("tokenizer.zig");
 pub const parser = @import("parser.zig");
 pub const expression_parser = @import("expression_parser.zig");
 pub const expression_resolver = @import("expression_resolver.zig");
+pub const expression_emitter = @import("expression_emitter.zig");
 
 test {
     _ = parsed;
@@ -18,6 +19,7 @@ test {
     _ = parser;
     _ = expression_parser;
     _ = expression_resolver;
+    _ = expression_emitter;
     _ = @import("parser_integration_test.zig");
     _ = @import("boolean_test.zig");
     _ = @import("datetime_test.zig");

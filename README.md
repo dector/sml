@@ -70,8 +70,22 @@ Grouping and operand order are preserved. Ordering against `null` is rejected.
 Raw SQL has unknown type and is trusted, including whole CHECK roots, but cannot
 excuse a known non-Boolean logical operand or known Boolean/blob ordering operand.
 Raw SQL text `NULL` stays opaque; it is not a DSL null literal. Parsed operators
-remain unchanged. Expression SQL emission and schema constraints are not added
-by this standalone resolution API.
+remain unchanged. Schema constraints are not added by these standalone APIs.
+
+`expression_emitter.emit(resolved.Expression, *std.Io.Writer) Error!void` writes
+one SQLite expression (no statement or newline). It accepts scalar roots; use
+resolver validation for operand types and CHECK roots. Operators are fully
+parenthesized; `!` emits `NOT`, and lowered null comparisons emit `IS` / `IS NOT`
+with the original operands. SQL names are double-quoted, text apostrophes are
+doubled, and text NULs use encoding-independent `char(0)` concatenation, sharing
+schema-default quoting. Trusted raw SQL is parenthesized without rewriting `_`
+or any other content.
+
+Preflight rejects structural depth above 256, nonfinite numbers, empty/NUL SQL
+names, empty/NUL raw SQL, invalid enum tags, and unlowered comparisons with null
+before writing anything. It does not duplicate resolver operand typing or parse
+trusted SQL. Writer failures return `error.WriteFailed` and may leave partial
+output; callers own and flush the writer.
 
 ## Development
 
@@ -85,5 +99,6 @@ python3 src/testdata/boolean_runtime_test.py
 python3 src/testdata/datetime_runtime_test.py
 python3 src/testdata/encoding_runtime_test.py
 python3 src/testdata/enum_runtime_test.py
+python3 src/testdata/expression_runtime_test.py
 ```
 

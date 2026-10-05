@@ -1,0 +1,22 @@
+a && b	("a"" SQL" AND "b SQL")
+a || b	("a"" SQL" OR "b SQL")
+!a	(NOT "a"" SQL")
+!a == b	((NOT "a"" SQL") = "b SQL")
+!(a == b)	(NOT (("a"" SQL" = "b SQL")))
+a != null	("a"" SQL" IS NOT NULL)
+(null) == (a)	((NULL) IS ("a"" SQL"))
+(null) != (a)	((NULL) IS NOT ("a"" SQL"))
+null == null	(NULL IS NULL)
+a == b	("a"" SQL" = "b SQL")
+a != b	("a"" SQL" != "b SQL")
+a && !b || a == null	(("a"" SQL" AND (NOT "b SQL")) OR ("a"" SQL" IS NULL))
+`_ + 1`	(_ + 1)
+`NULL` == null	((NULL) IS NULL)
+_ != null	("a"" SQL" IS NOT NULL)
+-7	-7
+1.25	1.25
+true	1
+false	0
+'O''Brien'	'O''Brien'
+'hé\0''尾'	('hé' || char(0) || '''尾')
+1 < 2 && 2 <= 3 || 4 > 3 && 4 >= 4	(((1 < 2) AND (2 <= 3)) OR ((4 > 3) AND (4 >= 4)))
