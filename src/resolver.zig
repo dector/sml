@@ -6,6 +6,7 @@
 const std = @import("std");
 const parsed = @import("model/parsed.zig");
 const resolved = @import("model/resolved.zig");
+const literals = @import("literal_decoder.zig");
 
 pub const Category = enum {
     unknown_type,
@@ -59,13 +60,13 @@ pub fn resolve(allocator: std.mem.Allocator, input: parsed.Schema) std.mem.Alloc
     return .{ .schema = .{ .schema = schema, .arena = arena } };
 }
 
-const Error = std.mem.Allocator.Error || error{SemanticFailure};
 const Options = struct { name: ?parsed.Token = null, reuse: ?parsed.Span = null };
 const Context = struct {
+    pub const Error = std.mem.Allocator.Error || error{SemanticFailure};
     allocator: std.mem.Allocator,
     diagnostic: ?Diagnostic = null,
 
-    fn fail(self: *Context, category: Category, span: parsed.Span, message: []const u8) Error {
+    pub fn fail(self: *Context, category: Category, span: parsed.Span, message: []const u8) Error {
         self.diagnostic = .{ .category = category, .span = span, .message = message };
         return error.SemanticFailure;
     }
@@ -90,25 +91,7 @@ const Context = struct {
     }
 
     fn backticks(self: *Context, token: parsed.Token) Error![]const u8 {
-        const text = token.text;
-        if (std.mem.indexOfAny(u8, text, "\r\n") != null)
-            return self.fail(.unsupported_multiline, token.span, "multiline backticks are not supported yet");
-        var hashes: usize = 0;
-        while (hashes < text.len and text[hashes] == '#') : (hashes += 1) {}
-        if (text.len < 2 * hashes + 2 or text[hashes] != '`')
-            return self.fail(.invalid_literal, token.span, "expected matching backtick delimiters");
-        const start = hashes + 1;
-        var i = start;
-        while (i < text.len) : (i += 1) {
-            if (text[i] != '`') continue;
-            var end = i + 1;
-            while (end < text.len and text[end] == '#') : (end += 1) {}
-            if (hashes == 0) end = i + 1 else if (end - i - 1 != hashes) continue;
-            if (end != text.len)
-                return self.fail(.invalid_literal, token.span, "backtick literal contains its closing delimiter");
-            return text[start..i];
-        }
-        return self.fail(.invalid_literal, token.span, "expected matching backtick delimiters");
+        return literals.backticks(self, token);
     }
 
     fn name(self: *Context, token: parsed.Token, override: ?parsed.Token) Error![]const u8 {
@@ -245,19 +228,9 @@ const Context = struct {
         if (!compatible) return self.fail(.invalid_default, token.span, "default does not match column type or nullability");
         return switch (value) {
             .enum_text => .{ .text = try self.enumText(token) },
-            .boolean => blk: {
-                if (std.mem.eql(u8, token.text, "true")) break :blk .{ .boolean = true };
-                if (std.mem.eql(u8, token.text, "false")) break :blk .{ .boolean = false };
-                return self.fail(.invalid_literal, token.span, "expected true or false literal");
-            },
-            .integer => .{ .integer = std.fmt.parseInt(i64, token.text, 10) catch
-                return self.fail(.invalid_literal, token.span, "invalid or out-of-range integer literal") },
-            .real => blk: {
-                const number = std.fmt.parseFloat(f64, token.text) catch
-                    return self.fail(.invalid_literal, token.span, "invalid real literal");
-                if (!std.math.isFinite(number)) return self.fail(.invalid_literal, token.span, "real literal must be finite");
-                break :blk .{ .real = number };
-            },
+            .boolean => .{ .boolean = try literals.boolean(self, token) },
+            .integer => .{ .integer = try literals.integer(self, token) },
+            .real => .{ .real = try literals.real(self, token) },
             .text => blk: {
                 const text = try self.string(token);
                 if (storage == .datetime) {
@@ -273,56 +246,15 @@ const Context = struct {
                 break :blk .now;
             },
             .null_value => blk: {
-                if (!std.mem.eql(u8, token.text, "null")) return self.fail(.invalid_literal, token.span, "expected null literal");
+                try literals.nullValue(self, token);
                 break :blk .null_value;
             },
-            .raw_sql => blk: {
-                const sql = try self.backticks(token);
-                if (sql.len == 0 or std.mem.indexOfScalar(u8, sql, 0) != null)
-                    return self.fail(.invalid_literal, token.span, "raw SQL must be nonempty and contain no NUL");
-                break :blk .{ .raw_sql = try self.allocator.dupe(u8, sql) };
-            },
+            .raw_sql => .{ .raw_sql = try literals.rawSql(self, token) },
         };
     }
 
     fn string(self: *Context, token: parsed.Token) Error![]const u8 {
-        const text = token.text;
-        if (std.mem.indexOfAny(u8, text, "\r\n") != null)
-            return self.fail(.unsupported_multiline, token.span, "multiline string decoding is not supported yet");
-        var hashes: usize = 0;
-        while (hashes < text.len and text[hashes] == '#') : (hashes += 1) {}
-        if (hashes > 0) {
-            if (std.mem.startsWith(u8, text[hashes..], "'''"))
-                return self.fail(.unsupported_multiline, token.span, "multiline raw string decoding is not supported yet");
-            if (text.len < 2 * hashes + 2 or text[hashes] != '\'' or
-                text[text.len - hashes - 1] != '\'' or !std.mem.eql(u8, text[0..hashes], text[text.len - hashes ..]))
-                return self.fail(.invalid_literal, token.span, "raw string requires matching hash delimiters");
-            const content_end = text.len - hashes - 1;
-            var i = hashes + 1;
-            while (i < text.len) : (i += 1) {
-                if (text[i] != '\'') continue;
-                var end = i + 1;
-                while (end < text.len and text[end] == '#') : (end += 1) {}
-                if (end - i - 1 != hashes) continue;
-                if (i != content_end or end != text.len)
-                    return self.fail(.invalid_literal, token.span, "raw string contains its closing delimiter");
-                return self.allocator.dupe(u8, text[hashes + 1 .. i]);
-            }
-            return self.fail(.invalid_literal, token.span, "raw string requires matching hash delimiters");
-        }
-        if (text.len < 2 or text[0] != '\'' or text[text.len - 1] != '\'')
-            return self.fail(.invalid_literal, token.span, "text requires single-quote or hash delimiters");
-        var output: std.ArrayList(u8) = .empty;
-        var i: usize = 1;
-        while (i < text.len - 1) : (i += 1) {
-            if (text[i] == '\'') {
-                if (i + 1 >= text.len - 1 or text[i + 1] != '\'')
-                    return self.fail(.invalid_literal, token.span, "embedded single quotes must be doubled");
-                i += 1;
-            }
-            try output.append(self.allocator, text[i]);
-        }
-        return output.toOwnedSlice(self.allocator);
+        return literals.string(self, token);
     }
 };
 
