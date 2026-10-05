@@ -24,6 +24,8 @@ pub const Kind = enum {
     less_than_or_equal,
     greater_than,
     greater_than_or_equal,
+    logical_and,
+    logical_or,
     hash,
     comma,
     newline,
@@ -106,6 +108,10 @@ pub const Tokenizer = struct {
             return self.token(.generator, start);
         }
         self.pos += 1;
+        if ((c == '&' or c == '|') and self.pos < self.source.len and self.source[self.pos] == c) {
+            self.pos += 1;
+            return self.token(if (c == '&') .logical_and else .logical_or, start);
+        }
         if ((c == '=' or c == '!' or c == '<' or c == '>') and self.pos < self.source.len and self.source[self.pos] == '=') {
             self.pos += 1;
             return self.token(switch (c) {
@@ -297,6 +303,26 @@ test "comments retain markers, docs retain spacing, and blank lines remain visib
     try expectToken(&s, .identifier, "name", 2);
     try expectToken(&s, .comment, "-- inline", 2);
     try expectToken(&s, .newline, "\n", 2);
+}
+
+test "logical tokens use maximal pairs and preserve spans without legacy pipes" {
+    var s = Tokenizer.init("  a&&b||!c");
+    try expectToken(&s, .identifier, "a", 2);
+    try expectToken(&s, .logical_and, "&&", 2);
+    try expectToken(&s, .identifier, "b", 2);
+    try expectToken(&s, .logical_or, "||", 2);
+    try expectToken(&s, .bang, "!", 2);
+    try expectToken(&s, .identifier, "c", 2);
+    try expectToken(&s, .eof, "", 2);
+    for ([_][]const u8{ "&", "|", "& &", "| |", "&&&", "|||" }) |source| {
+        var lexer = Tokenizer.init(source);
+        const first = lexer.next();
+        const diagnostic = if (first == .diagnostic) first.diagnostic else lexer.next().diagnostic;
+        const start: usize = if (first == .diagnostic) 0 else 2;
+        try std.testing.expectEqualDeep(parsed.Span{ .start = start, .end = start + 1 }, diagnostic.span);
+        if (source[start] == '|')
+            try std.testing.expectEqualStrings("pipe bodies are not supported; use '=' or braces", diagnostic.message);
+    }
 }
 
 test "invalid and unsupported syntax produces diagnostics" {

@@ -1,4 +1,4 @@
-//! Literal, reference, grouping, unary logical-not, and comparison expression parsing. Token text borrows source, which must
+//! Literal, reference, grouping, unary logical-not, comparison, and logical expression parsing. Token text borrows source, which must
 //! outlive the result. Numeric conversion and literal decoding belong to resolution.
 const std = @import("std");
 const parsed = @import("model/parsed.zig");
@@ -75,7 +75,7 @@ pub const Parser = struct {
     const Node = struct { expression: parsed.Expression, height: usize = 0 };
 
     pub fn parseExpression(self: *Parser) Error!parsed.Expression {
-        return (try self.comparison()).expression;
+        return (try self.binaryLevel(.logical_or)).expression;
     }
 
     fn structuralDepth(self: *Parser, height: usize, span: parsed.Span) Error!void {
@@ -83,24 +83,38 @@ pub const Parser = struct {
             return self.fail(span, "Expression structural depth exceeds maximum of 256");
     }
 
-    // One precedence level; mixed comparison chains associate left.
-    fn comparison(self: *Parser) Error!Node {
-        var left = try self.unary();
+    const Level = enum { logical_or, logical_and, comparison };
+
+    fn binaryOperand(self: *Parser, comptime level: Level) Error!Node {
+        return switch (level) {
+            .logical_or => self.binaryLevel(.logical_and),
+            .logical_and => self.binaryLevel(.comparison),
+            .comparison => self.unary(),
+        };
+    }
+
+    // Every binary level associates left; tighter levels parse each operand.
+    fn binaryLevel(self: *Parser, comptime level: Level) Error!Node {
+        var left = try self.binaryOperand(level);
         while (true) {
             if (self.paren_depth > 0) try self.trivia();
-            const operator: BinaryOperator = switch (self.current.kind) {
-                .equal_equal => .equal,
-                .not_equal => .not_equal,
-                .less_than => .less_than,
-                .less_than_or_equal => .less_than_or_equal,
-                .greater_than => .greater_than,
-                .greater_than_or_equal => .greater_than_or_equal,
-                else => return left,
+            const operator: BinaryOperator = switch (level) {
+                .logical_or => if (self.current.kind == .logical_or) .logical_or else return left,
+                .logical_and => if (self.current.kind == .logical_and) .logical_and else return left,
+                .comparison => switch (self.current.kind) {
+                    .equal_equal => .equal,
+                    .not_equal => .not_equal,
+                    .less_than => .less_than,
+                    .less_than_or_equal => .less_than_or_equal,
+                    .greater_than => .greater_than,
+                    .greater_than_or_equal => .greater_than_or_equal,
+                    else => return left,
+                },
             };
             const operator_span = self.current.span;
             try self.advance();
             if (self.paren_depth > 0) try self.trivia();
-            const right = try self.unary();
+            const right = try self.binaryOperand(level);
             const height = @max(left.height, right.height) + 1;
             try self.structuralDepth(height, operator_span);
             const lhs = try self.allocator.create(parsed.Expression);
@@ -171,7 +185,7 @@ pub const Parser = struct {
             return self.fail(self.current.span, "Empty parenthesized expression");
         if (self.current.kind == .eof)
             return self.fail(self.current.span, "Unclosed parenthesized expression; expected ')'");
-        const expression = try self.comparison();
+        const expression = try self.binaryLevel(.logical_or);
         try self.trivia();
         if (self.current.kind != .r_paren)
             return self.fail(self.current.span, "Expected ')' after parenthesized expression");
@@ -464,7 +478,7 @@ test "diagnostics retain original source offsets" {
 }
 
 test "stream parsing preserves next token and original spans" {
-    inline for (.{ "001", "field", "_", "((001))", "(\n  field\n)", "!!_", "!(field)", "!a >= b", "(a\n<=\nb)", "(!\n true)" }) |leaf| {
+    inline for (.{ "001", "field", "_", "((001))", "(\n  field\n)", "!!_", "!(field)", "!a >= b", "(a\n<=\nb)", "(!\n true)", "a&&b||c", "(a\n&&\nb\n||\nc)" }) |leaf| {
         for ([_][]const u8{ "prefix " ++ leaf ++ "\nnext", "prefix " ++ leaf ++ "}" }) |source| {
             var lexer = tokenizer.Tokenizer.init(source);
             _ = lexer.next(); // An enclosing parser already consumed the prefix.
@@ -492,7 +506,7 @@ fn allocationSuccess(backing: std.mem.Allocator) !void {
     var no_resize = std.testing.FailingAllocator.init(backing, .{ .resize_fail_index = 0 });
     const allocator = no_resize.allocator();
     try allocationLeaves(allocator);
-    for ([_][]const u8{ "((001))", "(\n  ( -- comment\n #'borrowed'#)\n)", &nestedSource(max_nesting, "_"), "!!true", "!(!\n -- operand\n field)", &unarySource(max_nesting, "_"), "!a==b!=c<d<=e>f>=g", "(a\n<=\n!b)", &comparisonSource(max_nesting) }) |source| {
+    for ([_][]const u8{ "((001))", "(\n  ( -- comment\n #'borrowed'#)\n)", &nestedSource(max_nesting, "_"), "!!true", "!(!\n -- operand\n field)", &unarySource(max_nesting, "_"), "!a==b!=c<d<=e>f>=g", "(a\n<=\n!b)", &comparisonSource(max_nesting), "!a==b&&c||!(d&&e)", "(a\n&&\nb\n||\nc)", &logicalSource(max_nesting, "&&"), &logicalSource(max_nesting, "||") }) |source| {
         var result = try parse(allocator, source);
         try std.testing.expect(result == .expression);
         defer result.expression.deinit();
@@ -502,7 +516,7 @@ fn allocationSuccess(backing: std.mem.Allocator) !void {
 fn allocationFailure(backing: std.mem.Allocator) !void {
     var no_resize = std.testing.FailingAllocator.init(backing, .{ .resize_fail_index = 0 });
     const allocator = no_resize.allocator();
-    for ([_][]const u8{ "1 unsupported", "((1)) unsupported", "(((1))", "((1) --- bad", "((1) 'unterminated", "!!true unsupported", "(!!true", "(!true !", "!", "!!", "! 'unterminated", "a==", "a!=b<", "(a<=b", "a>=b unsupported", "a==b 'unterminated", &comparisonSource(max_nesting + 1), &nestedSource(1, &comparisonSource(max_nesting)) }) |source| {
+    for ([_][]const u8{ "1 unsupported", "((1)) unsupported", "(((1))", "((1) --- bad", "((1) 'unterminated", "!!true unsupported", "(!!true", "(!true !", "!", "!!", "! 'unterminated", "a==", "a!=b<", "(a<=b", "a>=b unsupported", "a==b 'unterminated", &comparisonSource(max_nesting + 1), &nestedSource(1, &comparisonSource(max_nesting)), "a&&", "a||b&&", "(a&&b", "a||b unsupported", "a&&b 'unterminated", &logicalSource(max_nesting + 1, "&&"), &nestedSource(1, &logicalSource(max_nesting, "||")) }) |source| {
         const result = try parse(allocator, source);
         try std.testing.expect(result == .diagnostic);
     }
@@ -519,6 +533,90 @@ test "allocation failure checks cover successful and rejected input" {
     try std.testing.expectError(error.OutOfMemory, parse(failing.allocator(), "((1))"));
     try std.testing.expectError(error.OutOfMemory, parse(failing.allocator(), "!true"));
     try std.testing.expectError(error.OutOfMemory, parse(failing.allocator(), "a==b"));
+    try std.testing.expectError(error.OutOfMemory, parse(failing.allocator(), "a&&b"));
+    try std.testing.expectError(error.OutOfMemory, parse(failing.allocator(), "a||b"));
+}
+
+test "logical precedence grouping associativity and exact spans" {
+    const source = "  !a == b && c != d || e && f  ";
+    var result = try parse(std.testing.allocator, source);
+    try std.testing.expect(result == .expression);
+    defer result.expression.deinit();
+    const node = result.expression.expression;
+    const outer = node.kind.binary;
+    try std.testing.expectEqual(BinaryOperator.logical_or, outer.operator);
+    try std.testing.expectEqualDeep(parsed.Span{ .start = 20, .end = 22 }, outer.operator_span);
+    try std.testing.expectEqualDeep(parsed.Span{ .start = 2, .end = source.len - 2 }, node.span);
+    const lhs = outer.left.kind.binary;
+    try std.testing.expectEqual(BinaryOperator.logical_and, lhs.operator);
+    try std.testing.expectEqualDeep(parsed.Span{ .start = 10, .end = 12 }, lhs.operator_span);
+    try std.testing.expectEqual(BinaryOperator.equal, lhs.left.kind.binary.operator);
+    try std.testing.expectEqual(BinaryOperator.not_equal, lhs.right.kind.binary.operator);
+    try std.testing.expectEqualStrings("a", lhs.left.kind.binary.left.kind.unary.operand.kind.identifier.text);
+    try std.testing.expectEqual(BinaryOperator.logical_and, outer.right.kind.binary.operator);
+    try std.testing.expectEqualStrings("e && f", source[outer.right.span.start..outer.right.span.end]);
+    try std.testing.expect(outer.left != outer.right);
+    inline for (.{ .{ "&&", .logical_and }, .{ "||", .logical_or } }) |case| {
+        var chain = try parse(std.testing.allocator, "a " ++ case[0] ++ " b " ++ case[0] ++ " c");
+        try std.testing.expect(chain == .expression);
+        defer chain.expression.deinit();
+        const binary = chain.expression.expression.kind.binary;
+        try std.testing.expectEqual(@as(BinaryOperator, case[1]), binary.operator);
+        try std.testing.expectEqual(@as(BinaryOperator, case[1]), binary.left.kind.binary.operator);
+        try std.testing.expectEqualStrings("c", binary.right.kind.identifier.text);
+        try std.testing.expectEqualStrings("a", binary.left.kind.binary.left.kind.identifier.text);
+    }
+    var group = try parse(std.testing.allocator, "(a || b) && c");
+    try std.testing.expect(group == .expression);
+    defer group.expression.deinit();
+    try std.testing.expectEqual(BinaryOperator.logical_and, group.expression.expression.kind.binary.operator);
+    const grouped = group.expression.expression.kind.binary.left;
+    try std.testing.expectEqualDeep(parsed.Span{ .start = 0, .end = 8 }, grouped.span);
+    try std.testing.expectEqual(BinaryOperator.logical_or, grouped.kind.grouping.kind.binary.operator);
+}
+
+test "logical syntax permits multiline trivia only inside parentheses" {
+    var result = try parse(std.testing.allocator, "(a\n -- before\n && -- after\r\n !b\n ||\n c)");
+    try std.testing.expect(result == .expression);
+    defer result.expression.deinit();
+    try std.testing.expectEqual(BinaryOperator.logical_or, result.expression.expression.kind.grouping.kind.binary.operator);
+    for ([_][]const u8{
+        "&&a",               "||a",   "a&&",                "a||",         "a && || b", "a &&& b", "a ||| b",
+        "a & b",             "a | b", "a and b",            "a or b",      "a&&\nb",    "a\n||b",  "a -- comment\n&&b",
+        "a|| -- comment\nb", "(a&&)", "(a||\n--- docs\nb)", "(a &&\n\tb)", "T | true",
+    }) |source| {
+        const rejected = try parse(std.testing.allocator, source);
+        try std.testing.expect(rejected == .diagnostic);
+        try std.testing.expect(rejected.diagnostic.span.end <= source.len);
+    }
+    const malformed = try parse(std.testing.allocator, "a && || b");
+    try std.testing.expectEqualDeep(parsed.Span{ .start = 5, .end = 7 }, malformed.diagnostic.span);
+}
+
+fn logicalSource(comptime count: usize, comptime operator: []const u8) [1 + count * 3]u8 {
+    var source: [1 + count * 3]u8 = undefined;
+    source[0] = 'a';
+    for (0..count) |i| @memcpy(source[1 + i * 3 ..][0..3], operator ++ "a");
+    return source;
+}
+
+test "logical structural budget includes all precedence levels" {
+    inline for (.{ "&&", "||" }) |operator| {
+        var accepted = try parse(std.testing.allocator, &logicalSource(max_nesting, operator));
+        try std.testing.expect(accepted == .expression);
+        defer accepted.expression.deinit();
+        for ([_][]const u8{
+            &logicalSource(max_nesting + 1, operator),
+            &logicalSource(10000, operator),
+            &nestedSource(1, &logicalSource(max_nesting, operator)),
+            &unarySource(max_nesting, "a" ++ operator ++ "b"),
+            &logicalSource(max_nesting, operator) ++ "&&b||c",
+        }) |source| {
+            const rejected = try parse(std.testing.allocator, source);
+            try std.testing.expect(rejected == .diagnostic);
+            try std.testing.expectEqualStrings("Expression structural depth exceeds maximum of 256", rejected.diagnostic.message);
+        }
+    }
 }
 
 fn comparisonSource(comptime count: usize) [1 + count * 3]u8 {
