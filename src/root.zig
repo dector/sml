@@ -12,4 +12,5 @@ test {
     _ = resolver;
     _ = tokenizer;
     _ = parser;
+    _ = @import("parser_integration_test.zig");
 }
