@@ -146,15 +146,113 @@ test "structural depth 256 accepted 257 rejected even for manual and cyclic tree
     try std.testing.expectEqual(resolver.Category.excessive_depth, cyclic.diagnostic.category);
 }
 
-test "null comparisons are deferred and logical null is not Boolean" {
-    const operators = [_][]const u8{ "==", "!=", "<", "<=", ">", ">=", "&&", "||" };
+test "null ordering and logical null are rejected" {
+    const operators = [_][]const u8{ "<", "<=", ">", ">=", "&&", "||" };
     inline for (operators) |operator| {
         const source = "null " ++ operator ++ " true";
         const logical = comptime std.mem.eql(u8, operator, "&&") or std.mem.eql(u8, operator, "||");
         try diagnostic(source, .{ .table = table }, if (logical) .incompatible_operands else .unsupported_null_comparison, 0, if (logical) 4 else source.len);
     }
+    inline for (.{ "<", "<=", ">", ">=" }) |operator| {
+        const right_null = "true " ++ operator ++ " (null)";
+        const both_null = "(null) " ++ operator ++ " null";
+        try diagnostic(right_null, .{ .table = table }, .unsupported_null_comparison, 0, right_null.len);
+        try diagnostic(both_null, .{ .table = table }, .unsupported_null_comparison, 0, both_null.len);
+    }
+    try diagnostic("!(null)", .{ .table = table }, .incompatible_operands, 1, 7);
+    try diagnostic("true && (null)", .{ .table = table }, .incompatible_operands, 8, 14);
+    try diagnostic("true || null", .{ .table = table }, .incompatible_operands, 8, 12);
     // The right child must be resolved even if the left is trusted SQL.
     try diagnostic("`trusted` == missing", .{ .table = table }, .unknown_reference, 13, 20);
+}
+
+test "null equality lowers only resolved operators and preserves operands and metadata" {
+    const model = @import("model/resolved_expression.zig");
+    const cases = [_]struct { source: []const u8, operator: model.BinaryOperator }{
+        .{ .source = "endAt == null", .operator = .is_null },
+        .{ .source = "null != endAt", .operator = .is_not_null },
+        .{ .source = "((null)) == (endAt)", .operator = .is_null },
+        .{ .source = "(endAt) != ((null))", .operator = .is_not_null },
+        .{ .source = "null == null", .operator = .is_null },
+        .{ .source = "(null) != ((null))", .operator = .is_not_null },
+    };
+    for (cases) |case| {
+        var syntax = try parser.parse(a, case.source);
+        defer syntax.expression.deinit();
+        const original = syntax.expression.expression;
+        try std.testing.expect(original.kind.binary.operator == .equal or original.kind.binary.operator == .not_equal);
+        var result = try resolver.resolve(a, original, .{ .table = table });
+        defer result.expression.deinit();
+        const expression = result.expression.expression;
+        const binary = expression.kind.binary;
+        try std.testing.expectEqual(case.operator, binary.operator);
+        try std.testing.expectEqualDeep(model.TypeInfo{ .type = .boolean, .nullable = false }, expression.type_info.?);
+        try std.testing.expectEqualDeep(original.span, expression.span);
+        try std.testing.expectEqualDeep(original.kind.binary.left.span, binary.left.span);
+        try std.testing.expectEqualDeep(original.kind.binary.right.span, binary.right.span);
+        try std.testing.expectEqualStrings(@tagName(original.kind.binary.left.kind), @tagName(binary.left.kind));
+        try std.testing.expectEqualStrings(@tagName(original.kind.binary.right.kind), @tagName(binary.right.kind));
+        try std.testing.expect(resolver.validateCheckResult(&expression) == null);
+    }
+    var grouped = try run(a, "((null)) == (endAt)", .{ .table = table });
+    defer grouped.expression.deinit();
+    const binary = grouped.expression.expression.kind.binary;
+    try std.testing.expect(binary.left.kind.grouping.kind.grouping.kind == .null_value);
+    try std.testing.expect(binary.left.type_info == null);
+    try std.testing.expectEqualDeep(model.TypeInfo{ .type = .datetime, .nullable = true }, binary.right.type_info.?);
+    try std.testing.expectEqualStrings("exact SQL end", binary.right.kind.grouping.kind.identifier.sql_name);
+
+    // All logical families and opaque operands support null tests, not coercion.
+    for ([_][]const u8{ "i", "r", "s", "e", "d", "b", "blob", "`NULL`", "'bad timestamp'", "false", "1" }) |operand| {
+        const source = try std.fmt.allocPrint(a, "({s}) == (null)", .{operand});
+        defer a.free(source);
+        var result = try run(a, source, .{ .table = typed_table });
+        defer result.expression.deinit();
+        try std.testing.expectEqual(model.BinaryOperator.is_null, result.expression.expression.kind.binary.operator);
+        try std.testing.expectEqualDeep(model.TypeInfo{ .type = .boolean }, result.expression.expression.type_info.?);
+    }
+    var field = try run(a, "_ != (null)", .{ .table = table, .field_index = 1 });
+    defer field.expression.deinit();
+    try std.testing.expectEqual(model.BinaryOperator.is_not_null, field.expression.expression.kind.binary.operator);
+    try std.testing.expectEqualStrings("exact SQL end", field.expression.expression.kind.binary.left.kind.current_value.sql_name);
+}
+
+test "raw SQL NULL stays opaque and ordinary nullable comparisons stay three valued" {
+    const model = @import("model/resolved_expression.zig");
+    const cases = [_]struct { source: []const u8, operator: model.BinaryOperator, nullable: bool }{
+        .{ .source = "d == d", .operator = .equal, .nullable = true },
+        .{ .source = "b != false", .operator = .not_equal, .nullable = true },
+        .{ .source = "d < d", .operator = .less_than, .nullable = true },
+        .{ .source = "i == (`NULL`)", .operator = .equal, .nullable = true },
+        .{ .source = "`NULL` != `NULL`", .operator = .not_equal, .nullable = true },
+        .{ .source = "`NULL` < i", .operator = .less_than, .nullable = true },
+        .{ .source = "(b == null) && (b != null)", .operator = .logical_and, .nullable = false },
+        .{ .source = "(b == null) || b", .operator = .logical_or, .nullable = true },
+    };
+    for (cases) |case| {
+        var result = try run(a, case.source, .{ .table = typed_table });
+        defer result.expression.deinit();
+        try std.testing.expectEqual(case.operator, result.expression.expression.kind.binary.operator);
+        try std.testing.expectEqualDeep(model.TypeInfo{ .type = .boolean, .nullable = case.nullable }, result.expression.expression.type_info.?);
+        try std.testing.expect(resolver.validateCheckResult(&result.expression.expression) == null);
+    }
+    var raw = try run(a, "(`NULL`)", .{ .table = table });
+    defer raw.expression.deinit();
+    try std.testing.expectEqualStrings("NULL", raw.expression.expression.kind.grouping.kind.raw_sql);
+    try std.testing.expect(raw.expression.expression.type_info == null);
+    var negated = try run(a, "!(null == null)", .{ .table = table });
+    defer negated.expression.deinit();
+    try std.testing.expectEqualDeep(model.TypeInfo{ .type = .boolean }, negated.expression.expression.type_info.?);
+}
+
+fn nullAllocationCase(allocator: std.mem.Allocator) !void {
+    var result = try run(allocator, "(null) == (endAt) && (null != null) || (`NULL` == null)", .{ .table = table });
+    defer result.expression.deinit();
+}
+
+fn nullFailureAllocationCase(allocator: std.mem.Allocator) !void {
+    const result = try run(allocator, "(endAt == null) && (endAt < (null))", .{ .table = table });
+    try std.testing.expectEqual(resolver.Category.unsupported_null_comparison, result.diagnostic.category);
 }
 
 fn fieldAllocationCase(allocator: std.mem.Allocator) !void {
@@ -218,7 +316,6 @@ test "strict logical family matrix with trusted SQL and nullable propagation" {
     try diagnostic("d == '1900-02-29T00:00:00Z'", context, .invalid_literal, 5, 27);
     try diagnostic("'bad' < d", context, .invalid_literal, 0, 5);
     try diagnostic("d == '2000-01-01'", context, .invalid_literal, 5, 17);
-    try diagnostic("(null) == `opaque`", context, .unsupported_null_comparison, 0, 18);
 }
 
 test "CHECK root validation is separate from scalar resolution" {
@@ -241,4 +338,6 @@ test "allocation failures and semantic failure after allocations reclaim arena" 
     try std.testing.checkAllAllocationFailures(a, allocationCase, .{});
     try std.testing.checkAllAllocationFailures(a, fieldAllocationCase, .{});
     try std.testing.checkAllAllocationFailures(a, failureAllocationCase, .{});
+    try std.testing.checkAllAllocationFailures(a, nullAllocationCase, .{});
+    try std.testing.checkAllAllocationFailures(a, nullFailureAllocationCase, .{});
 }

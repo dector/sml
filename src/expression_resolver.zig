@@ -149,15 +149,19 @@ const Worker = struct {
             .binary => |binary| {
                 const left = try self.child(binary.left, depth + 1);
                 const right = try self.child(binary.right, depth + 1);
-                switch (binary.operator) {
-                    .logical_and, .logical_or => {
+                const operator: model.BinaryOperator = switch (binary.operator) {
+                    .logical_and, .logical_or => blk: {
                         try self.requireBoolean(left);
                         try self.requireBoolean(right);
+                        break :blk if (binary.operator == .logical_and) .logical_and else .logical_or;
                     },
                     else => try self.comparison(left, right, binary.operator, input.span),
-                }
-                output.kind = .{ .binary = .{ .operator = binary.operator, .left = left, .right = right } };
-                output.type_info = .{ .type = .boolean, .nullable = maybeNullable(left) or maybeNullable(right) };
+                };
+                output.kind = .{ .binary = .{ .operator = operator, .left = left, .right = right } };
+                output.type_info = .{ .type = .boolean, .nullable = switch (operator) {
+                    .is_null, .is_not_null => false,
+                    else => maybeNullable(left) or maybeNullable(right),
+                } };
             },
         }
         return output;
@@ -170,9 +174,17 @@ const Worker = struct {
         return self.fail(.incompatible_operands, operand.span, "logical operators require Boolean operands (or trusted raw SQL)");
     }
 
-    fn comparison(self: *Worker, left: *const resolved.Expression, right: *const resolved.Expression, operator: model.BinaryOperator, span: parsed.Span) Error!void {
-        if (ungroup(left).kind == .null_value or ungroup(right).kind == .null_value)
-            return self.fail(.unsupported_null_comparison, span, "null comparisons not supported yet");
+    fn comparison(self: *Worker, left: *const resolved.Expression, right: *const resolved.Expression, operator: @import("model/parsed_expression.zig").BinaryOperator, span: parsed.Span) Error!model.BinaryOperator {
+        if (ungroup(left).kind == .null_value or ungroup(right).kind == .null_value) {
+            return switch (operator) {
+                .equal => .is_null,
+                .not_equal => .is_not_null,
+                else => self.fail(.unsupported_null_comparison, span, "ordering comparisons against null are not supported; use == or !="),
+            };
+        }
+        const lowered: model.BinaryOperator = switch (operator) {
+            inline else => |op| @field(model.BinaryOperator, @tagName(op)),
+        };
         const ordering = operator != .equal and operator != .not_equal;
         // Even with an opaque peer, a known Boolean/blob cannot be ordered.
         if (ordering) {
@@ -183,17 +195,17 @@ const Worker = struct {
                 }
             }
         }
-        const l = if (left.type_info) |info| info.type else return;
-        const r = if (right.type_info) |info| info.type else return;
+        const l = if (left.type_info) |info| info.type else return lowered;
+        const r = if (right.type_info) |info| info.type else return lowered;
         if (l == .datetime and r == .text and ungroup(right).kind == .text) {
             try self.datetimeLiteral(right);
-            return;
+            return lowered;
         }
         if (r == .datetime and l == .text and ungroup(left).kind == .text) {
             try self.datetimeLiteral(left);
-            return;
+            return lowered;
         }
-        if (l == r or (numeric(l) and numeric(r)) or (textual(l) and textual(r))) return;
+        if (l == r or (numeric(l) and numeric(r)) or (textual(l) and textual(r))) return lowered;
         return self.fail(.incompatible_operands, span, "comparison requires matching logical families: numeric, text/enum, datetime, Boolean equality, or blob-reference equality");
     }
 

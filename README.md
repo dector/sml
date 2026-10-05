@@ -55,17 +55,23 @@ Operand typing (logical types, not SQLite storage coercions):
 
 | Operators | Accepted DSL operands |
 | --- | --- |
-| `!`, `&&`, `||` | Boolean only |
-| `==`, `!=` | Same family: numeric (int/real), text (str/enum), datetime, Boolean, blob references |
+| `!`, `&&`, `||` | Boolean (including nullable Boolean references), not an untyped `null` literal |
+| `==`, `!=` | Same family: numeric (int/real), text (str/enum), datetime, Boolean, blob references; or either operand a `null` literal |
 | `<`, `<=`, `>`, `>=` | Numeric, text, or datetime family only |
 
 Datetime also compares with a valid canonical `YYYY-MM-DDTHH:MM:SSZ` string
 literal on either side, not a str/enum reference. Enum values compare as text;
-no enum membership check applies here. Operators return Boolean and propagate
-operand nullability. Raw SQL has unknown type and is trusted, including whole
-CHECK roots, but cannot excuse a known non-Boolean logical operand or known
-Boolean/blob ordering operand. Null comparisons currently report
-`null comparisons not supported yet`; SQL null rewrites are deferred.
+no enum membership check applies here. Ordinary comparisons and logical operators
+return Boolean and propagate operand nullability (SQL UNKNOWN); nullable Boolean
+CHECK roots are accepted. Equality/inequality with a DSL `null` literal on either
+side, including grouped literals or two nulls, lowers to resolved `is_null` /
+`is_not_null` operators (SQL `IS` / `IS NOT`) with non-nullable Boolean results.
+Grouping and operand order are preserved. Ordering against `null` is rejected.
+Raw SQL has unknown type and is trusted, including whole CHECK roots, but cannot
+excuse a known non-Boolean logical operand or known Boolean/blob ordering operand.
+Raw SQL text `NULL` stays opaque; it is not a DSL null literal. Parsed operators
+remain unchanged. Expression SQL emission and schema constraints are not added
+by this standalone resolution API.
 
 ## Development
 

@@ -7,7 +7,20 @@ const resolved = @import("resolved.zig");
 const syntax = @import("parsed_expression.zig");
 
 pub const UnaryOperator = syntax.UnaryOperator;
-pub const BinaryOperator = syntax.BinaryOperator;
+/// Resolved operators are separate from syntax. Null-literal equality lowers
+/// to IS / IS NOT; operands (including grouping and source order) are preserved.
+pub const BinaryOperator = enum {
+    equal,
+    not_equal,
+    less_than,
+    less_than_or_equal,
+    greater_than,
+    greater_than_or_equal,
+    logical_and,
+    logical_or,
+    is_null,
+    is_not_null,
+};
 
 pub const TypeInfo = struct {
     type: resolved.StorageType,
