@@ -12,12 +12,21 @@ pub const Table = struct {
     columns: []const Column = &.{},
 };
 
-/// A stored column.
+/// SQLite storage types supported by the resolved model.
+pub const StorageType = enum {
+    integer,
+    real,
+    text,
+    blob,
+};
+
+/// A stored column. Semantic resolution chooses its SQLite storage type.
 pub const Column = struct {
     dsl_name: []const u8,
     sql_name: []const u8,
+    type: StorageType,
+    nullable: bool = false,
 };
 
 /// Virtual relationship metadata; never a stored column.
 pub const Relationship = struct {};
-
