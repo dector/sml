@@ -1,7 +1,9 @@
 # Parser plan
 
-Status: settled interview decisions and implementation plan. No parser code has
-been implemented yet. See [the language design](design-v1.md) for broader v1 scope.
+Status: the first supported parser milestone (stages 1–4) is implemented and
+covered by tokenizer, parser, allocation-failure, and source-to-SQL tests.
+Stage 5 remains future work; unsupported syntax is diagnosed rather than ignored.
+See [the language design](design-v1.md) for broader v1 scope.
 
 ## Goal and first milestone
 
@@ -16,8 +18,8 @@ The first milestone supports:
   raw text strings, null, and raw SQL.
 - `#name` and field-level `#allow reuse`.
 - Built-in string type `str`, emitted as SQLite `TEXT`; `text` and `string` are
-  not DSL aliases. The current resolver's `text` spelling must be renamed during
-  implementation; no resolver code has changed yet.
+  not DSL aliases. The resolver now uses `str`; SQLite storage and internal
+  text-value representations remain unchanged.
 - Indentation-based `=` and braced field bodies.
 - Source-only comments and preserved declaration documentation.
 - Ordinary and hash-delimited backticks.
@@ -152,11 +154,11 @@ compatibility with the field type belong to resolution.
 
 ## Parser API and ownership
 
-Recommended API shape, following the resolver:
+Implemented API shape, following the resolver:
 
 ```text
 parse(allocator, source) -> Allocator.Error!Result
-Result = parsed schema with owner | diagnostic
+Result = .schema OwnedSchema { schema, arena, deinit() } | .diagnostic { message, span }
 ```
 
 - The parser owns arrays through an arena, exposed through a result with `deinit()`.
@@ -231,7 +233,7 @@ Test:
 Run `zig build test` and `zig fmt --check build.zig build.zig.zon src` after
 implementation changes.
 
-### 5. Later v1 feature slices
+### 5. Later v1 feature slices (not part of this milestone)
 
 Extend syntax models, parser, resolver, emitter, and tests together:
 

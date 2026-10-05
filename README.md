@@ -2,7 +2,23 @@
 
 SQLite Modeling Language.
 
-See [the v1 design](docs/design-v1.md).
+See [the v1 design](docs/design-v1.md) and [parser scope](docs/parser-plan.md).
+
+## Parser
+
+The library exports `parser.parse(allocator, source)`. It returns either an
+arena-owned `.schema` or the first `.diagnostic` (message and byte span).
+Allocation failure returns `error.OutOfMemory` separately.
+
+Keep `source` alive while using the parsed schema. Pass `result.schema.schema`
+to `resolver.resolve`, then free the parsed arena with `result.schema.deinit()`.
+The resolved result owns its text and arrays and also requires `deinit()`.
+Use `emitter.emit` to write the resolved schema as SQLite SQL.
+
+Supported: braced tables, stored fields, `!` keys, nullable `?`, literal defaults,
+`#name`, field `#allow reuse`, declaration docs, and field bodies using braces or
+`=` with exactly two extra spaces. The string type is `str`, not `text` or
+`string`. Unsupported later-v1 syntax returns a diagnostic.
 
 ## Development
 
