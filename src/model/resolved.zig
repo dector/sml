@@ -26,6 +26,7 @@ pub const Column = struct {
     sql_name: []const u8,
     type: StorageType,
     nullable: bool = false,
+    primary_key: bool = false,
 };
 
 /// Virtual relationship metadata; never a stored column.
