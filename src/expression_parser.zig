@@ -1,4 +1,4 @@
-//! Literal, reference, and parenthesized expression parsing. Token text borrows source, which must
+//! Literal, reference, grouping, and unary logical-not expression parsing. Token text borrows source, which must
 //! outlive the result. Numeric conversion and literal decoding belong to resolution.
 const std = @import("std");
 const parsed = @import("model/parsed.zig");
@@ -22,8 +22,8 @@ pub const Result = union(enum) {
 /// Parses exactly one expression, allowing newlines/comments inside parentheses
 /// and surrounding blank lines/comments, but never docs or bare continuations.
 /// No partial result escapes on syntax errors or allocation failure.
-/// Leaves borrow source text; grouping children belong to the result's arena.
-/// Recursive nesting is limited to max_nesting (also for future operators).
+/// Leaves borrow source text; grouping and unary children belong to the result's arena.
+/// Recursive nesting is limited to max_nesting, shared by grouping and unary chains.
 pub fn parse(allocator: std.mem.Allocator, source: []const u8) std.mem.Allocator.Error!Result {
     var arena = std.heap.ArenaAllocator.init(allocator);
     errdefer arena.deinit();
@@ -39,7 +39,7 @@ pub fn parse(allocator: std.mem.Allocator, source: []const u8) std.mem.Allocator
     return .{ .expression = .{ .expression = expression, .arena = arena } };
 }
 
-/// Maximum recursive expression nesting, shared by grouping and future operators.
+/// Maximum recursive expression nesting, shared by grouping and unary operators.
 pub const max_nesting = 256;
 
 /// Reusable stream parser. Supply `current` from `lexer.next()`; the lexer must
@@ -54,6 +54,7 @@ pub const Parser = struct {
     current: tokenizer.Token = undefined,
     diagnostic: ?parsed.Diagnostic = null,
     depth: usize = 0,
+    paren_depth: usize = 0,
 
     pub const Error = error{Syntax} || std.mem.Allocator.Error;
 
@@ -70,7 +71,7 @@ pub const Parser = struct {
     }
 
     pub fn parseExpression(self: *Parser) Error!parsed.Expression {
-        // Keep this at the recursive entry point when adding unary/binary parsing.
+        // All grouping and unary operands recurse through this bounded entry point.
         // The root is depth zero; 256 nested constructs plus their leaf are valid.
         if (self.depth > max_nesting)
             return self.fail(self.current.span, "Expression nesting exceeds maximum of 256");
@@ -91,8 +92,9 @@ pub const Parser = struct {
             else
                 .{ .identifier = token },
             .l_paren => return self.grouping(),
+            .bang => return self.logicalNot(),
             .r_paren => return self.fail(value.span, "Expected an expression before ')'"),
-            .bang, .equal, .question => return self.fail(value.span, "Operators are not supported"),
+            .equal, .question => return self.fail(value.span, "Operators are not supported"),
             .doc => return self.fail(value.span, "Documentation is not allowed in expressions"),
             else => return self.fail(value.span, "Expected a literal or reference expression"),
         };
@@ -100,7 +102,23 @@ pub const Parser = struct {
         return .{ .kind = kind, .span = value.span };
     }
 
+    // Unary ! binds to the next unary or primary expression (highest precedence).
+    fn logicalNot(self: *Parser) Error!parsed.Expression {
+        const start = self.current.span.start;
+        try self.advance();
+        if (self.paren_depth > 0) try self.trivia();
+        const operand = try self.parseExpression();
+        const child = try self.allocator.create(parsed.Expression);
+        child.* = operand;
+        return .{
+            .kind = .{ .unary = .{ .operator = .logical_not, .operand = child } },
+            .span = .{ .start = start, .end = operand.span.end },
+        };
+    }
+
     fn grouping(self: *Parser) Error!parsed.Expression {
+        self.paren_depth += 1;
+        defer self.paren_depth -= 1;
         const start = self.current.span.start;
         try self.advance();
         try self.trivia();
@@ -212,7 +230,7 @@ test "reference grammar rejects dotted and enum names, trailing tokens and docs"
     const cases = [_][]const u8{
         "Author.name",     "in-progress",     "a-1",           "_x.y",            "_.value",
         "field other",     "field\nother",    "_ _",           "field -- end\n_", "--- docs\nfield",
-        "field\n--- docs", "_ --- inline",    "(field other)", "!_",              "field = other",
+        "field\n--- docs", "_ --- inline",    "(field other)", "!",               "field = other",
         "_?",              "field and other", "field str?",    "::now",           "#unique",
         "field {}",
     };
@@ -229,7 +247,7 @@ test "reject empty, incomplete, unsupported and trailing syntax" {
     const cases = [_][]const u8{
         "",            " \n-- comment",   "--- docs\n1", "1\n--- docs",     "1 --- inline",
         "'unfinished", "#'unfinished'##", "`unfinished", "'a\nb'",          "1.",
-        "1e3",         "foo.bar",         "in-progress", "(1 2)",           "!true",
+        "1e3",         "foo.bar",         "in-progress", "(1 2)",           "!\ntrue",
         "1 = 2",       "1 + 2",           "1 < 2",       "true and false",  "::now",
         "#name",       "1 2",             "1\n2",        "1 -- comment\n2", "1\n+ 2",
         "1 }",         "null?",
@@ -240,6 +258,75 @@ test "reject empty, incomplete, unsupported and trailing syntax" {
         try std.testing.expect(result.diagnostic.message.len > 0);
         try std.testing.expect(result.diagnostic.span.start <= result.diagnostic.span.end);
         try std.testing.expect(result.diagnostic.span.end <= source.len);
+    }
+}
+
+test "unary logical not owns operands and includes operators in spans" {
+    inline for (.{ "true", "false", "null", "field", "_", "001", "-001.250", "'text'", "`sql`", "(field)" }) |leaf| {
+        const source = "  ! ! " ++ leaf ++ " -- end\n";
+        var result = try parse(std.testing.allocator, source);
+        try std.testing.expect(result == .expression);
+        defer result.expression.deinit();
+        const outer = result.expression.expression;
+        const inner = outer.kind.unary.operand;
+        const operand = inner.kind.unary.operand;
+        try std.testing.expect(outer.kind.unary.operator == .logical_not);
+        try std.testing.expect(inner.kind.unary.operator == .logical_not);
+        try std.testing.expectEqualDeep(parsed.Span{ .start = 2, .end = 6 + leaf.len }, outer.span);
+        try std.testing.expectEqualDeep(parsed.Span{ .start = 4, .end = 6 + leaf.len }, inner.span);
+        try std.testing.expectEqualDeep(parsed.Span{ .start = 6, .end = 6 + leaf.len }, operand.span);
+        try std.testing.expectEqualStrings(leaf, source[operand.span.start..operand.span.end]);
+    }
+    var result = try parse(std.testing.allocator, "!(!\r\n -- comment\n !\n field\n)");
+    try std.testing.expect(result == .expression);
+    defer result.expression.deinit();
+    const group = result.expression.expression.kind.unary.operand;
+    const unary = group.kind.grouping;
+    try std.testing.expectEqualStrings("field", unary.kind.unary.operand.kind.unary.operand.kind.identifier.text);
+}
+
+test "unary rejects missing operands bare breaks arithmetic and docs" {
+    for ([_][]const u8{
+        "!",                  "!!",        "! ",     "(!",    "(!!",       "(!)",       "!\ntrue",            "!!\ntrue",
+        "! -- comment\ntrue", "!\n(true)", "!(!)",   "(!\n)", "(! -- end", "! --- doc", "(!\n--- doc\ntrue)", "!true false",
+        "!true = false",      "+1",        "-field", "-(1)",  "!+1",       "!-(1)",     "- 1",                "!true + 1",
+    }) |source| {
+        const result = try parse(std.testing.allocator, source);
+        try std.testing.expect(result == .diagnostic);
+        try std.testing.expect(result.diagnostic.message.len > 0);
+        try std.testing.expect(result.diagnostic.span.start <= result.diagnostic.span.end);
+        try std.testing.expect(result.diagnostic.span.end <= source.len);
+    }
+    for ([_][]const u8{ "!", "!!", "(!", "(! -- end\n" }) |source| {
+        const result = try parse(std.testing.allocator, source);
+        try std.testing.expectEqualDeep(parsed.Span{ .start = source.len, .end = source.len }, result.diagnostic.span);
+    }
+    const schema_parser = @import("parser.zig");
+    for ([_][]const u8{ "T {\n  value bool = !true\n}", "T {\n  value bool = !!false\n}", "T {\n  value int = !1\n}" }) |source| {
+        const result = try schema_parser.parse(std.testing.allocator, source);
+        try std.testing.expect(result == .diagnostic);
+    }
+}
+
+test "unary chains share the grouping depth bound" {
+    const source = &unarySource(max_nesting, "_");
+    var result = try parse(std.testing.allocator, source);
+    try std.testing.expect(result == .expression);
+    defer result.expression.deinit();
+    var node: *const parsed.Expression = &result.expression.expression;
+    for (0..max_nesting) |_| node = node.kind.unary.operand;
+    try std.testing.expectEqualStrings("_", node.kind.current_value.text);
+    var mixed = try parse(std.testing.allocator, &nestedSource(max_nesting / 2, &unarySource(max_nesting / 2, "true")));
+    try std.testing.expect(mixed == .expression);
+    defer mixed.expression.deinit();
+    for ([_][]const u8{
+        &unarySource(max_nesting + 1, "true"),
+        &unarySource(10000, "true"),
+        &nestedSource(max_nesting / 2, &unarySource(max_nesting / 2 + 1, "true")),
+    }) |deep| {
+        const rejected = try parse(std.testing.allocator, deep);
+        try std.testing.expect(rejected == .diagnostic);
+        try std.testing.expectEqualStrings("Expression nesting exceeds maximum of 256", rejected.diagnostic.message);
     }
 }
 
@@ -269,9 +356,9 @@ test "groups own children and preserve exact grouping and leaf spans" {
 
 test "grouping rejects empty unclosed docs operators and bare continuations" {
     for ([_][]const u8{
-        "()",               "( -- empty\n)", "(( ))",           "(",               "( -- end",      "(1",      "((1)",
-        "(1 -- end\n",      "(1 2)",         "(1\n2)",          "(1) 2",           "(1)\n(2)",      "(1))",    ")",
-        "1\n(2)",           "(--- docs\n1)", "(\n--- docs\n1)", "(1\n--- docs\n)", "(1)\n--- docs", "(!true)", "(1 = 2)",
+        "()",               "( -- empty\n)", "(( ))",           "(",               "( -- end",      "(1",   "((1)",
+        "(1 -- end\n",      "(1 2)",         "(1\n2)",          "(1) 2",           "(1)\n(2)",      "(1))", ")",
+        "1\n(2)",           "(--- docs\n1)", "(\n--- docs\n1)", "(1\n--- docs\n)", "(1)\n--- docs", "(!)",  "(1 = 2)",
         "(true and false)", "(1 + 2)",       "(field.name)",
     }) |source| {
         const result = try parse(std.testing.allocator, source);
@@ -288,6 +375,13 @@ test "grouping rejects empty unclosed docs operators and bare continuations" {
     const schema_parser = @import("parser.zig");
     const schema = try schema_parser.parse(std.testing.allocator, "T {\n  value int = (1)\n}");
     try std.testing.expect(schema == .diagnostic);
+}
+
+fn unarySource(comptime count: usize, comptime leaf: []const u8) [count + leaf.len]u8 {
+    var source: [count + leaf.len]u8 = undefined;
+    @memset(source[0..count], '!');
+    @memcpy(source[count..], leaf);
+    return source;
 }
 
 fn nestedSource(comptime count: usize, comptime leaf: []const u8) [count * 2 + leaf.len]u8 {
@@ -324,7 +418,7 @@ test "diagnostics retain original source offsets" {
 }
 
 test "stream parsing preserves next token and original spans" {
-    inline for (.{ "001", "field", "_", "((001))", "(\n  field\n)" }) |leaf| {
+    inline for (.{ "001", "field", "_", "((001))", "(\n  field\n)", "!!_", "!(field)", "(!\n true)" }) |leaf| {
         for ([_][]const u8{ "prefix " ++ leaf ++ "\nnext", "prefix " ++ leaf ++ "}" }) |source| {
             var lexer = tokenizer.Tokenizer.init(source);
             _ = lexer.next(); // An enclosing parser already consumed the prefix.
@@ -347,17 +441,22 @@ fn allocationLeaves(allocator: std.mem.Allocator) !void {
     }
 }
 
-fn allocationSuccess(allocator: std.mem.Allocator) !void {
+fn allocationSuccess(backing: std.mem.Allocator) !void {
+    // Arena growth must allocate rather than depend on in-place backing growth.
+    var no_resize = std.testing.FailingAllocator.init(backing, .{ .resize_fail_index = 0 });
+    const allocator = no_resize.allocator();
     try allocationLeaves(allocator);
-    for ([_][]const u8{ "((001))", "(\n  ( -- comment\n #'borrowed'#)\n)", &nestedSource(max_nesting, "_") }) |source| {
+    for ([_][]const u8{ "((001))", "(\n  ( -- comment\n #'borrowed'#)\n)", &nestedSource(max_nesting, "_"), "!!true", "!(!\n -- operand\n field)", &unarySource(max_nesting, "_") }) |source| {
         var result = try parse(allocator, source);
         try std.testing.expect(result == .expression);
         defer result.expression.deinit();
     }
 }
 
-fn allocationFailure(allocator: std.mem.Allocator) !void {
-    for ([_][]const u8{ "1 unsupported", "((1)) unsupported", "(((1))", "((1) --- bad", "((1) 'unterminated" }) |source| {
+fn allocationFailure(backing: std.mem.Allocator) !void {
+    var no_resize = std.testing.FailingAllocator.init(backing, .{ .resize_fail_index = 0 });
+    const allocator = no_resize.allocator();
+    for ([_][]const u8{ "1 unsupported", "((1)) unsupported", "(((1))", "((1) --- bad", "((1) 'unterminated", "!!true unsupported", "(!!true", "(!true !", "!", "!!", "! 'unterminated" }) |source| {
         const result = try parse(allocator, source);
         try std.testing.expect(result == .diagnostic);
     }
@@ -372,4 +471,5 @@ test "allocation failure checks cover successful and rejected input" {
     const result = try parse(failing.allocator(), "1 unsupported");
     try std.testing.expect(result == .diagnostic);
     try std.testing.expectError(error.OutOfMemory, parse(failing.allocator(), "((1))"));
+    try std.testing.expectError(error.OutOfMemory, parse(failing.allocator(), "!true"));
 }
