@@ -115,6 +115,8 @@ pub const Directive = struct {
         name: Token,
         native_unique: NativeUnique,
         index: Index,
+        /// Argument-free flag, valid only inside index options.
+        unique,
         allow_reuse,
         /// Field `? expr`, table `?? expr`, or either scope's `#check expr`.
         check: Expression,

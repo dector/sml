@@ -58,10 +58,11 @@ pub const Default = union(enum) {
     raw_sql: []const u8,
 };
 
-/// Ordinary indexes own ordered column indices and their exact SQL name.
+/// Indexes own ordered column indices and their exact SQL name.
 pub const Index = struct {
     columns: []const usize,
     sql_name: []const u8,
+    unique: bool = false,
 };
 
 pub const UniqueConstraint = struct {

@@ -208,7 +208,7 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
         try writer.writeAll(") STRICT;\n");
     }
     for (schema.tables) |table| for (table.indexes) |index| {
-        try writer.writeAll("\nCREATE INDEX ");
+        try writer.writeAll(if (index.unique) "\nCREATE UNIQUE INDEX " else "\nCREATE INDEX ");
         try writeIdentifier(writer, index.sql_name);
         try writer.writeAll(" ON ");
         try writeIdentifier(writer, table.sql_name);

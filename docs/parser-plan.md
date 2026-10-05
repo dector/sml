@@ -2,7 +2,7 @@
 
 Status: the first supported parser milestone (stages 1–4) is implemented and
 covered by tokenizer, parser, allocation-failure, and source-to-SQL tests.
-Stage 5 is partially implemented through Slice16 ordinary indexes.
+Stage 5 is partially implemented through Slice17 unique indexes.
 `? unique` / `#check unique` preserve a native_unique payload with empty field
 references and ordered, spanned options. Same-line brace options support exact
 backtick #name only; duplicates are preserved for resolver diagnostics.
@@ -18,17 +18,22 @@ The emitter validates indices and names before output and writes ordered,
 quoted table UNIQUE items after PKs/checks. Plain NULLs remain distinct.
 Slice16 supports field `#index` and table `#index a, b`, with forward DSL
 references and ordered column indices in owned resolved.Table.indexes.
-Optional same-line braced options accept only exact backtick/hash-backtick
-`#name`; empty `{}` works, duplicate names retain spans and are rejected later.
+Slice17 adds argument-free `#unique` inside field/table index options.
+Optional same-line braced options accept exact backtick/hash-backtick `#name`
+and `#unique`; empty `{}` works. Duplicate names/flags retain spans and are
+rejected by the resolver. Flag arguments/bodies and standalone `#unique` fail.
+Resolved Index.unique defaults false; true emits CREATE UNIQUE INDEX using
+SQLite's distinct NULL semantics. Native `? unique` constraints are unchanged.
 Nested braced indexes in `=` field bodies use free brace indentation but exact
 +2 sibling indentation. Docs cannot attach to indexes or options.
 Default names are `{table_sql_name}_{column_sql_names_joined_by_underscore}_idx`.
 Names are nonempty/NUL-free; all tables/indexes share an ASCII-case-insensitive
 namespace including later declarations. Index `sqlite_` prefixes are reserved.
-No suffixing: repeated column lists need distinct explicit names, repeated
-columns fail. UNIQUE labels remain table-local and separate. Whole-schema
+No suffixing: repeated column lists need distinct explicit names, including
+ordinary/unique indexes on the same columns (both still default to `_idx`).
+Repeated columns fail. Native UNIQUE labels remain table-local and separate. Whole-schema
 preflight validates manual resolved input before writing all tables then indexes.
-`unique(nulls: equal)`, named checks, index `#unique`/`#where`, and expression
+`unique(nulls: equal)`, named checks, index `#where`, and expression
 indexes remain deferred. Unsupported syntax is diagnosed rather than ignored.
 See [the language design](design-v1.md) for broader v1 scope.
 
@@ -338,7 +343,7 @@ Extend syntax models, parser, resolver, emitter, and tests together:
 
 1. Additional defaults and date/JSON types. Inline enums are complete;
    reusable types remain deferred indefinitely.
-2. Nulls-equal, named check bodies, and partial indexes (ordinary indexes,
+2. Nulls-equal, named check bodies, and partial indexes (ordinary/unique indexes,
    composite uniqueness, expression precedence, field checks, and table checks
    are implemented; expression indexes are not supported).
 3. Stored FKs and virtual relationships.

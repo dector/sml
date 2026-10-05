@@ -276,11 +276,16 @@ const Parser = struct {
                     try self.noDocs(try self.trivia());
                     if (self.current.kind == .r_brace) break;
                     if (self.current.kind == .eof) return self.fail(self.current.span, "Expected '}' to close index options");
-                    const hash = try self.take(.hash, "Index options require #name backtick");
-                    if (!self.word("name")) return self.fail(self.current.span, "Only #name is supported in index options; #unique and #where are unsupported");
-                    try self.advance();
-                    const value = try self.take(.backtick, "#name requires a backtick literal");
-                    try options.append(self.allocator, .{ .kind = .{ .name = token(value) }, .span = .{ .start = hash.span.start, .end = value.span.end } });
+                    const hash = try self.take(.hash, "Index options require #name or #unique");
+                    if (self.word("unique")) {
+                        const flag_end = self.current.span.end;
+                        try self.advance();
+                        try options.append(self.allocator, .{ .kind = .unique, .span = .{ .start = hash.span.start, .end = flag_end } });
+                    } else if (self.word("name")) {
+                        try self.advance();
+                        const value = try self.take(.backtick, "#name requires a backtick literal");
+                        try options.append(self.allocator, .{ .kind = .{ .name = token(value) }, .span = .{ .start = hash.span.start, .end = value.span.end } });
+                    } else return self.fail(self.current.span, "Only #name and #unique are supported in index options; #where is unsupported");
                     try self.lineEnd();
                 }
             }
@@ -516,12 +521,12 @@ test "parser brace indentation is independent of indentation bodies" {
 
 test "parser rejects unsupported syntax, incomplete constructs and invalid scope rules" {
     const sources = [_][]const u8{
-        "T",                        "T {",                                      "T {\na",                            "T {\na int(",                                     "T {\na int(1",                      "T {\na int {",                               "T {\na int =",
-        "T\n{}",                    "T { a int }",                              "T {\na int }",                      "T {\na int b int\n}",                             "T {\na int {\n} =\n  #name `a`\n}", "T {\na int = {\n}\n}",                       "T {\na int |\n  #name `a`\n}",
-        "T {\na int =\n}\n",        "T {\na int =\n -- wrong indentation\n}\n", "T {\na int =\n   #name `a`\n}\n",   "T {\na int =\n  #name `a`\n   #allow reuse\n}\n", "T {\n\ta int\n}\n",                 "--- unattached\n",                           "--- detached\n\nT {}",
-        "T {\n--- unattached\n}\n", "T {\n--- directive docs\n#name `t`\n}\n",  "T {\na int =\n  --- doc-only\n}\n", "T {\na int --- inline\n}\n",                      "T {\n#allow reuse\n}\n",            "T {\na int {\n#index {\n#unique\n}\n}\n}\n", "type Foo {}",
-        "enum Foo {}",              "T {\n_a int\n_ int\n}\n",                  "T {\ntrue int\n}\n",                "T {\na null\n}\n",                                "T {\na bool(TRUE)\n}\n",            "T {\na int(random())\n}\n",                  "T {\na int(1 + 2)\n}\n",
-        "T {\na real(1e3)\n}\n",    "T {\na real(.5)\n}\n",                     "T {\na str(\"x\")\n}\n",            "T {\na str('multi\nline')\n}\n",                  "T {\n#name `unterminated\n}\n",     "T {\na int!\n}\n",                           "T {\na int #name `a`\n}\n",
+        "T",                        "T {",                                      "T {\na",                            "T {\na int(",                                     "T {\na int(1",                      "T {\na int {",                                    "T {\na int =",
+        "T\n{}",                    "T { a int }",                              "T {\na int }",                      "T {\na int b int\n}",                             "T {\na int {\n} =\n  #name `a`\n}", "T {\na int = {\n}\n}",                            "T {\na int |\n  #name `a`\n}",
+        "T {\na int =\n}\n",        "T {\na int =\n -- wrong indentation\n}\n", "T {\na int =\n   #name `a`\n}\n",   "T {\na int =\n  #name `a`\n   #allow reuse\n}\n", "T {\n\ta int\n}\n",                 "--- unattached\n",                                "--- detached\n\nT {}",
+        "T {\n--- unattached\n}\n", "T {\n--- directive docs\n#name `t`\n}\n",  "T {\na int =\n  --- doc-only\n}\n", "T {\na int --- inline\n}\n",                      "T {\n#allow reuse\n}\n",            "T {\na int {\n#index {\n#where a > 0\n}\n}\n}\n", "type Foo {}",
+        "enum Foo {}",              "T {\n_a int\n_ int\n}\n",                  "T {\ntrue int\n}\n",                "T {\na null\n}\n",                                "T {\na bool(TRUE)\n}\n",            "T {\na int(random())\n}\n",                       "T {\na int(1 + 2)\n}\n",
+        "T {\na real(1e3)\n}\n",    "T {\na real(.5)\n}\n",                     "T {\na str(\"x\")\n}\n",            "T {\na str('multi\nline')\n}\n",                  "T {\n#name `unterminated\n}\n",     "T {\na int!\n}\n",                                "T {\na int #name `a`\n}\n",
         "T {\na int;\n}\n",
     };
     for (sources) |source| _ = try expectDiagnostic(source);
