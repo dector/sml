@@ -2,7 +2,10 @@
 
 Status: the first supported parser milestone (stages 1–4) is implemented and
 covered by tokenizer, parser, allocation-failure, and source-to-SQL tests.
-Stage 5 is partially implemented through Slice18 partial indexes.
+Stage 5 is partially implemented, including partial indexes, stored FKs,
+virtual relationships, named generated keys/overrides, distinct unroled unnamed
+pairs (explicit and implicit), and logical `date`. Stages below retain their
+historical milestone scope; they are not a complete list of current support.
 `? unique` / `#check unique` preserve a native_unique payload with empty field
 references and ordered, spanned options. Same-line brace options support exact
 backtick #name only; duplicates are preserved for resolver diagnostics.
@@ -42,8 +45,10 @@ output. WHERE follows the quoted indexed columns; combined #unique applies only
 to matching rows without rewriting native uniqueness or distinct NULL behavior.
 SQLite disallows nondeterministic functions, subqueries and bound parameters;
 trusted raw SQL restrictions are not statically evaluated.
-`unique(nulls: equal)`, named checks, and expression-index columns
-remain deferred; expression-index grammar is unsettled. Unsupported syntax is diagnosed rather than ignored.
+`unique(nulls: equal)`, named expression CHECK bodies, and expression-index
+columns remain deferred; expression-index grammar is unsettled. Native UNIQUE
+constraint `#name` bodies are supported as described above. Unsupported syntax
+is diagnosed rather than ignored.
 See [the language design](design-v1.md) for broader v1 scope.
 
 ## Goal and first milestone
@@ -81,6 +86,13 @@ minutes/seconds 00–59. Offsets, leap seconds, and fractional seconds (even `.0
 are rejected; fractional precision is later work. Nullable NULL passes. Datetime
 keys are not auto-generated integers. Raw SQL defaults face the same runtime
 checks. See `src/datetime_test.zig` and `src/testdata/datetime_runtime_test.py`.
+Built-in logical `date` uses TEXT with exactly ASCII `YYYY-MM-DD`, years
+0001–9999, and Gregorian calendar validation. Decoded string defaults are
+validated; raw SQL defaults must pass runtime checks. Nullable NULL, ordinary
+PKs/FKs, checks, and index predicates are supported. Comparisons accept dates
+or canonical date string literals, not datetime or ordinary text references.
+Dates have no timezone or generator; `::now` remains datetime-only. See
+`src/date_test.zig` and `src/testdata/date_runtime_test.py`.
 Inline enums are implemented with TEXT storage and `CHECK (column IN (...))`.
 Field-level enum-only `#of` lines accumulate comma-separated members in either
 body form. Lists cannot be empty, omit a member, have trailing commas, or span
@@ -101,9 +113,10 @@ Parsed member/default tokens borrow source and retain spans. Resolution owns the
 decoded arrays and text. Resolver and emitter independently validate enum
 metadata and defaults at their API boundaries, before SQL output. The direct
 resolved `.raw_sql` default remains a trusted escape hatch; parser enum
-backticks are text, not SQL. NUL enum SQL uses quoted chunks plus `char(0)` to
-preserve text in UTF-8/UTF-16; the older NUL `str` blob-cast default has a known
-UTF-16 encoding bug (see design section 15). Tests: `src/enum_test.zig`, the
+backticks are text, not SQL. Backtick values may contain valid UTF-8 and NUL;
+malformed UTF-8 is rejected.
+Enum and `str` SQL text share quoted chunks plus `char(0)` for NUL, preserving
+text in UTF-8/UTF-16 (see design section 15). Tests: `src/enum_test.zig`, the
 `enum.pzl`/SQL fixture, and `src/testdata/enum_runtime_test.py`.
 
 Slice12 field checks are implemented end-to-end: `? expr` and `#check expr`
@@ -117,9 +130,10 @@ Backtick raw SQL is trusted and may refer to other SQL names without placeholder
 rewriting. Boolean (including nullable Boolean) or raw-SQL roots are required.
 Resolved columns own an ordered `checks` expression array in the schema arena.
 The emitter preflights all expressions and roots before any SQL; explicit checks
-follow builtin enum/bool/datetime checks and preserve their source order.
+follow builtin enum/bool/date/datetime checks and preserve their source order.
 `_ != null` emits `IS NOT NULL`; ordinary nullable comparisons retain SQL UNKNOWN.
-Named check bodies and constraint names remain unsupported.
+Named expression CHECK bodies remain unsupported; native UNIQUE constraint
+names are supported, not expression CHECK labels.
 Tests: `src/check_test.zig`, `src/check_extra_test.zig`, `checks.pzl`/SQL fixture,
 and `src/testdata/check_runtime_test.py`.
 
@@ -129,7 +143,7 @@ and source order. Resolution runs after all columns are known, with
 `expression_resolver.Context { .table = table, .field_index = null }`:
 DSL names resolve to final SQL names (including quoted `#name` overrides),
 forward references work, and `_` is invalid. The same Boolean/raw-SQL root,
-logical datatype, canonical UTC datetime, and null semantics apply as for fields.
+logical datatype, canonical date/UTC datetime, and null semantics apply as for fields.
 Single table `?` and field `??` fail with marker-span diagnostics. Docs cannot
 attach to checks. `resolved.Table.checks` owns ordered expressions; emission
 preflights every check before writing, then emits table CHECK items after columns
@@ -186,7 +200,8 @@ documentation detachment, forbidden options, and FK index coverage remain tested
 See `src/relationship_resolution_test.zig` for further ownership/OOM and mapping
 coverage. SQL documentation placement is still open, not part of this settled
 metadata-only implementation stage.
-Other generators, date/JSON and expression indexes come in later slices.
+Other generators, JSON, timezone companions, and expression-index columns
+remain unsupported. Date is implemented as described above.
 Explicit and implicit unnamed connections support distinct unroled pairs now. Reusable types are deferred indefinitely.
 Numeric exponent notation and multiline literals are deferred.
 
@@ -194,7 +209,8 @@ Numeric exponent notation and multiline literals are deferred.
 
 ### Scopes, bodies, and whitespace
 
-Tables require braces. Fields and reusable types have two alternative body forms:
+Tables require braces. Fields have two alternative body forms; the same forms
+are proposed for indefinitely deferred reusable types:
 
 ```text
 Author {
@@ -216,7 +232,7 @@ Author {
 - Blank lines and ordinary comments do not establish or end indentation scope.
   They may appear before the first actual body item.
 - A declaration cannot mix `=` and braced body forms.
-- An indentation body can contain nested braced options in later feature slices:
+- An indentation body can contain supported nested braced index/UNIQUE options:
 
   ```text
   name str =
@@ -334,6 +350,10 @@ Result = .schema OwnedSchema { schema, arena, deinit() } | .diagnostic { message
 
 ## Implementation stages
 
+Stages 1–4 below are the historical first-milestone plan, now delivered.
+Stage 5 records subsequent delivered slices alongside explicitly deferred work;
+use the status above and README for current support.
+
 ### 1. Model and literal groundwork
 
 Extend `src/model/parsed.zig` to represent attached docs and their spans. Define
@@ -397,12 +417,12 @@ implementation changes.
 
 Extend syntax models, parser, resolver, emitter, and tests together:
 
-1. Additional defaults and date/JSON types. Inline enums are complete;
-   reusable types remain deferred indefinitely.
-2. Nulls-equal and named check bodies (ordinary/unique/partial indexes,
+1. Date and inline enums are complete. JSON and additional generators remain
+   unsupported; reusable types remain deferred indefinitely.
+2. Nulls-equal and named expression CHECK bodies (ordinary/unique/partial indexes,
    composite uniqueness, expression precedence, field checks, and table checks
    are implemented; expression-index columns remain deferred pending grammar).
-3. Stored FKs and virtual relationships.
+3. Stored FKs, automatic FK indexes, and direct virtual relationships are implemented.
 4. NamedConnections Slice2 implements named connections, roles, and explicit
    composite PK FK keys. Endpoint target multisets are validated by a shared
    resolver/emitter helper. Repeated-table role bindings remain null; explicit

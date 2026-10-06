@@ -64,19 +64,21 @@ references and SQL `#name` overrides. SQL preserves the field list order.
 Repeated fields, duplicate field sets (even reversed or field/table singletons),
 and duplicate options are diagnosed. Table constraints follow PKs/checks.
 Plain uniqueness allows multiple NULLs, including composite NULL components.
-`unique(nulls: equal)` and named checks remain explicitly deferred.
+`unique(nulls: equal)` and named expression CHECK bodies remain explicitly
+deferred; the `#name` bodies above name native UNIQUE constraints, not CHECKs.
 
 Indexes support field `#index` (no arguments) and table
 `#index fieldA, fieldB` (one or more DSL names, no trailing comma).
 Forward references work; SQL preserves listed column order. Optional same-line
 braces accept exact backtick/hash-backtick `#name` and argument-free `#unique`,
 including empty `{}`. `#unique` emits CREATE UNIQUE INDEX; otherwise indexes
-are ordinary. Duplicate flags are diagnosed; arguments and bodies are rejected.
+are ordinary. Duplicate flags are diagnosed; flag arguments and flag bodies
+are rejected.
 Nested braced indexes work inside `=` field bodies; brace indentation is free,
 but following siblings must return to exactly declaration indentation + 2.
-Docs cannot target indexes or their options. Standalone `#unique`, `#where`,
-and expression-index columns are unsupported (their grammar remains unsettled).
-Slice18 adds `#where expr` inside field/table index braces. It uses the shared
+Docs cannot target indexes or their options. Standalone `#unique` and `#where`
+are unsupported; expression-index columns remain deferred pending grammar.
+`#where expr` is supported inside field/table index braces. It uses the shared
 expression parser, including grouped multiline expressions. Predicates resolve
 in table row scope: DSL field names (including forward references and `#name`
 mapping) work; `_` is invalid even for field indexes. The root must be Boolean
@@ -325,10 +327,14 @@ no SQL columns, constraints, tables, or indexes. Real FK index coverage is
 unchanged. Emitter preflight checks endpoint membership and FK directions;
 incomplete connection metadata is rejected, never inferred during emission.
 
-`expression_parser.parse(allocator, source)` separately parses one literal,
-ordinary identifier reference (`[A-Za-z_][A-Za-z0-9_]*`), or standalone `_`
-current-value expression. `true`, `false`, and `null` remain literals; words
-such as `str`, `unique`, and `now` are references here. The result is an owned
+DSL declaration names use `[A-Za-z_][A-Za-z0-9_]*`; standalone `_`, `true`,
+`false`, and `null` are reserved, not declaration names. Enum value contexts
+have their own grammar described above.
+
+`expression_parser.parse(allocator, source)` separately parses one expression
+with literals, ordinary identifier references (`[A-Za-z_][A-Za-z0-9_]*`), or
+standalone `_` current-value references. `true`, `false`, and `null` remain
+literals; words such as `str`, `unique`, and `now` are references here. The result is an owned
 `.expression` or a `.diagnostic`; call `result.expression.deinit()` on success
 and keep the source alive because token text borrows it. Surrounding blank lines
 and ordinary comments are allowed, but docs and trailing expressions are not.
@@ -356,9 +362,10 @@ Operand typing (logical types, not SQLite storage coercions):
 | `==`, `!=` | Same family: numeric (int/real), text (str/enum), date, datetime, Boolean, blob references; or either operand a `null` literal |
 | `<`, `<=`, `>`, `>=` | Numeric, text, date, or datetime family only |
 
-Datetime also compares with a valid canonical `YYYY-MM-DDTHH:MM:SSZ` string
-literal on either side, not a str/enum reference. Enum values compare as text;
-no enum membership check applies here. Ordinary comparisons and logical operators
+Date also compares with a valid canonical `YYYY-MM-DD` string literal on either
+side, not a str/enum or datetime reference. Datetime similarly accepts canonical
+`YYYY-MM-DDTHH:MM:SSZ` string literals, not str/enum or date references.
+Enum values compare as text; no enum membership check applies here. Ordinary comparisons and logical operators
 return Boolean and propagate operand nullability (SQL UNKNOWN); nullable Boolean
 CHECK roots are accepted. Equality/inequality with a DSL `null` literal on either
 side, including grouped literals or two nulls, lowers to resolved `is_null` /

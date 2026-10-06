@@ -8,8 +8,9 @@ indexes, and relationships, and compiles them into fresh-schema SQLite SQL.
 This document consolidates the design discussion. **Settled rules** are described
 below. Where the discussion did not settle an implementation detail, it is listed
 under **Open decisions** rather than silently made part of the language. See the
-[parser implementation plan](parser-plan.md) for the settled initial-parser scope;
-these syntax decisions require implementation updates, not just resolver changes.
+[parser implementation plan](parser-plan.md) and [README](../README.md) for
+current support. This document also retains future design sketches; settled
+design does not imply implemented syntax.
 
 ### v1 scope
 
@@ -21,10 +22,17 @@ these syntax decisions require implementation updates, not just resolver changes
 - Stored foreign-key syntax, target/type resolution, SQL emission, and deletion
   actions, shared-PK identity, and automatic ordinary FK indexes are implemented
   (StoredFK Slice6). Direct backrefs and named explicit-key connections with
-  virtual endpoint relationships are implemented. Generated connections remain planned.
+  virtual endpoint relationships are implemented. Named `~~` keys, generated
+  key overrides, and explicit/implicit distinct unroled unnamed pairs are implemented.
 - Inline enums are implemented. Reusable types (including named enums) are
   deferred indefinitely; their examples below are design sketches, not supported syntax.
-- Role-named and multi-endpoint connections support explicit keys (NamedConnections Slice4).
+- Named role/self/multi-endpoint connections support explicit and generated keys.
+  Unnamed roles/self/multi-endpoint connections and nested endpoints are unsupported.
+- Current types: `int`, `real`, `str`, `blob`, `bool`, `date`, `datetime`, inline `enum`.
+  Expressions, field/table checks, named native UNIQUE constraints, ordinary/unique/
+  partial indexes, and FK/backref resolution are implemented.
+- JSON, update generators, timezone companions, named expression CHECK bodies,
+  nulls-equal uniqueness, arithmetic, and expression-index columns are unsupported.
 - No custom SQLite runtime functions required by generated constraints.
 
 Older SQLite versions are not a supported v1 target. Documentation can explain
@@ -32,6 +40,9 @@ which features require newer SQLite, but the compiler does not promise an older
 compatibility mode.
 
 ## 2. Syntax at a glance
+
+Broader v1 design sketch, not an executable current-subset example: reusable
+types, `#use`, generated validators, JSON, and update triggers are unsupported.
 
 ```text
 => Status enum(draft) =
@@ -108,7 +119,7 @@ v1 constraint catalog.
 | `_` | Current value in field/type DSL expressions |
 | `::name` | Tool-generated constraint/default |
 | `--` | Source-only comment |
-| `---` | Doc comment, preserved in generated SQL |
+| `---` | Declaration docs; stored objects emit SQL comments, relationships retain metadata only |
 
 Earlier exploratory forms such as `Author = {}`, `id: int`, `@auto`, `| default`,
 `via`, `in`, relationship arrows, and `>`/`>>` constraint markers are **not** the
@@ -207,15 +218,16 @@ Author {
   blank line or left at the end of a scope.
 - Doc targets are tables, fields (including relationships), reusable types, and
   connections, not directives or constraints.
-- Attached docs are preserved as comments in generated SQL.
+- Attached table/stored-field/connection docs are preserved as SQL comments.
+  Virtual relationship docs are owned text-only metadata and emit no SQL comments.
 - Comment-looking characters inside strings and raw SQL are content, not DSL
   comments.
 - Documentation attached to a `~` relationship is permitted even though the
   relationship has no column.
 
-**Open detail:** output placement for docs attached to reusable types or virtual
-relationships needs a convention; these declarations have no standalone SQL
-object.
+**Open detail:** future SQL placement for virtual relationship docs and docs on
+unsupported reusable types needs a convention; neither has a standalone SQL
+object. Current virtual docs remain metadata only.
 
 ## 5. Names
 
@@ -310,7 +322,7 @@ backticks (see section 8) in the parser and resolver.
 | `bool` | `INTEGER` | Value must be `0` or `1` |
 | `date` | `TEXT` | Valid date in `YYYY-MM-DD` format |
 | `datetime` | `TEXT` | Valid UTC timestamp in a fixed format |
-| `json` | `TEXT` | `json_valid` |
+| `json` (unsupported design sketch) | `TEXT` | Proposed `json_valid` |
 | `enum` | `TEXT` | Allowed-value check |
 
 The string built-in is `str`, not `text`; it maps to SQLite `TEXT`.
@@ -870,8 +882,10 @@ email str =
 is deferred. Slice15 supports field and table uniqueness. Fields emit column
 `[CONSTRAINT quoted_name] UNIQUE` after defaults/checks; tables emit
 `[CONSTRAINT quoted_name] UNIQUE (quoted_columns)` after PKs/checks, not SQL `CHECK`.
-Options use same-line braces (including empty `{}`), never `=`. Only `#name`
-is accepted; duplicate names and duplicate field uniqueness are errors.
+Options use braces opened on the constraint line (including empty `{}`), never
+`=`; nonempty bodies are multiline. Only `#name` is accepted; duplicate names
+and duplicate field uniqueness are errors. Named expression CHECK bodies are
+unsupported; these names apply only to native UNIQUE constraints.
 Names must be nonempty with no NUL, are safely quoted verbatim, and must be
 ASCII-case-insensitively distinct within the table. These labels are not index
 object names. Documentation cannot target individual constraints.
@@ -908,7 +922,8 @@ is retained for SQL. Repeated fields and duplicate sets (including reversed
 lists or a table singleton duplicating field uniqueness) are errors.
 The optional braced `#name` body follows the same rules as field uniqueness.
 Boolean fields can be unique, although they cannot be primary keys.
-Indexes and nulls-equal options remain future work.
+Ordinary, unique, and partial indexes are implemented (section 17);
+nulls-equal options remain deferred.
 
 ### Nulls
 
@@ -1119,7 +1134,8 @@ prove this (even a constant true predicate). Otherwise compilation fails.
 Nullable backing FKs are allowed: distinct NULLs do not reference any profile.
 Direct collections require no uniqueness proof. All public resolved relationship
 metadata is preflighted before any SQL writes; relationships emit no SQL.
-Documentation output placement remains undecided.
+Relationship docs are owned text-only metadata and emit no SQL comments;
+future SQL placement remains undecided.
 
 Singular backrefs must be nullable in v1. A required forward FK guarantees every
 referencing row has a target, but does not guarantee every target has a referring
@@ -1744,7 +1760,7 @@ Fixed-format UTC text sorts chronologically. Reusable types remain indefinitely
 deferred. Date and enum support are now implemented separately; JSON and update
 generators remain outside this datetime slice.
 
-### Companion timezone field
+### Companion timezone field (unsupported design sketch)
 
 ```text
 Event {
@@ -1785,7 +1801,7 @@ validation against the full IANA database.
 **Open detail:** the exact compatibility rules for explicitly declared timezone
 fields, including nullable fields and constrained `str` aliases, need finalization.
 
-### Automatic update timestamps
+### Automatic update timestamps (unsupported design sketch)
 
 ```text
 updatedAt datetime(::now) =
@@ -1807,7 +1823,10 @@ when two timestamps have the same second value; support composite and keyless
 tables appropriately; use null-safe old/new comparisons. The exact trigger SQL
 and behavior for no-op updates remain implementation details to settle and test.
 
-## 19. JSON in v1
+## 19. JSON in v1 (unsupported design sketch)
+
+JSON fields and defaults are not implemented; the following describes proposed
+v1 behavior, not emitted SQL today.
 
 SQLite has JSON functions, not a native `JSON` column type accepted by `STRICT`
 tables. Our `json` type compiles to validated `TEXT`:
@@ -1869,7 +1888,9 @@ settle duplicate-key rejection for JSON supplied as a v1 string literal; SQLite'
 
 ## 20. Compiler behavior and diagnostics
 
-### Required behavior
+### Required behavior (broader design target)
+
+Reusable-type/timezone expansion and triggers below are not implemented.
 
 - Parse one complete source file before resolving references.
 - Expand reusable types, connection keys, and companion timezone fields.
@@ -1882,6 +1903,9 @@ settle duplicate-key rejection for JSON supplied as a v1 string literal; SQLite'
 - Report clear errors for unsupported SQLite requirements/features.
 
 ### Key compile errors
+
+This table includes design rules for unsupported reusable types, JSON, and
+`#use`; their semantic diagnostics are not promises of current implementation.
 
 | Situation | Result |
 | --- | --- |
@@ -1920,29 +1944,25 @@ SQLite error; SQLite remains the authority on its syntax and enforcement rules.
 Raw SQL and exact names should be treated as trusted schema-source input, not
 untrusted application data.
 
-**Open output details:** CLI format, destination file handling, generated-object
-ordering, validation against an actual SQLite connection, and whether compiler
-errors guarantee no partial output still need design. Prefer deterministic output
-and fail-before-write behavior.
+**Current output contract:** whole-schema semantic preflight runs before any SQL
+is written; all tables precede all indexes. Writer failures may leave partial
+output. CLI format, destination file handling, trigger ordering, and validation
+against an actual SQLite connection remain design decisions.
 
-### Current supported-subset resolver
+### Current supported-subset pipeline
 
-`src/resolver.zig` resolves manually constructed `parsed.Schema` values; no parser
-is implemented. It still uses the historical `text` spelling, not the settled
-`str` built-in, and must be updated; this is not a language alias. It supports
-tables, stored fields, `int`/`real`/`text`/`blob`,
-nullability, defaults, primary keys, `#name`, and field-level `#allow reuse`.
-Unknown type names are errors; reusable type declarations are not modeled yet.
-Literal integer defaults also fit `real`; other literal kinds must match their
-storage type. Raw SQL defaults are trusted, not SQL-syntax-validated.
+`parser.parse` produces `parsed.Schema`; `resolver.resolve` also accepts manually
+constructed parsed models. Current support is summarized in section 1 and the
+README, including `str` (not `text`), bool/date/datetime/enums, checks, uniqueness,
+indexes, FKs, virtual relationships, and connection expansion. Unknown types
+are errors; reusable types remain deferred indefinitely. Literal integers also
+fit `real`; other literal defaults must match their logical type. Raw SQL is
+trusted, not SQL-syntax-validated.
 
-This is a historical description of the current resolver, not an implementation
-of the newly settled parser syntax. Ordinary strings use quote doubling with
-literal backslashes. Single-line hash-delimited raw strings preserve content
-literally. Multiline strings are explicitly rejected. Backtick arguments currently
-must have exactly one opening and closing delimiter; embedded backticks are
-rejected. The parser plan requires updates to support hash-delimited backticks
-and the other settled lexical and body rules in this document.
+Ordinary strings use quote doubling with literal backslashes. Single-line
+hash-delimited strings and backticks support exact matching delimiter counts,
+including embedded backticks. Multiline literals remain rejected. These parser
+and resolver changes are delivered, not pending initial-milestone work.
 
 The API is `resolve(allocator, parsed_schema) -> Allocator.Error!Result`.
 `Result.diagnostic` contains the first semantic error category, source span, and
@@ -1952,6 +1972,10 @@ result. Failure releases all partial allocations. Out-of-memory is separate from
 semantic diagnostics. Resolution never emits partial SQL.
 
 ## 21. Consolidated example
+
+Broader design sketch, not an executable current-subset fixture. It includes
+unsupported reusable types, generated validators, JSON, timezone companions,
+and update triggers alongside implemented syntax.
 
 ```text
 -- One source file. Order of declarations does not matter.
@@ -2147,6 +2171,10 @@ validation, Unicode collation, timezone conversion, or automatic query loading.
 
 ## 22. Edge cases to test
 
+Design checklist mixing delivered coverage and future feature tests; it is not
+a current support list. JSON, nulls-equal, reusable types, timezone companions,
+and update triggers below remain unsupported.
+
 ### Parsing and scopes
 
 - `=` bodies inside braced tables: direct items exactly two spaces beyond the
@@ -2233,25 +2261,30 @@ These are not new agreed requirements; they are gaps worth resolving explicitly.
 1. Deferred multiline-string edge cases: blank markers, dedent tabs, and line
    endings. Single-line strings, quote doubling, literal backslashes, and
    hash-delimited backticks are settled.
-2. Generated index/trigger naming. Section 5 covers ordinary SQL name normalization.
-3. Generated DSL key component casing edge cases (acronyms/underscores). Section
-   14 settles the component formula and named/unnamed generated-key order;
-   canonical ordering is no longer an open design choice.
+2. Generated trigger and expanded nulls-equal object naming. Ordinary/unique/
+   partial/FK index names and collision diagnostics are implemented (section 17).
+3. Future unnamed role/tie rules. Generated key casing (including acronyms and
+   underscores) and order for named connections and distinct unroled unnamed
+   pairs are implemented (section 14).
 4. Full validator catalog for `::`, especially email and nonempty-string semantics.
-5. Exact date/datetime format, precision, calendar validity checks, and accepted range.
+5. Future datetime fractional precision. Current whole dates and whole-second
+   UTC timestamps, Gregorian validity, and years 0001–9999 are settled and implemented.
 6. Nullable/constrained explicit timezone-field compatibility.
-7. Enum duplicate/empty-value rules and enum-literal syntax inside DSL expressions.
+7. Future enum-literal syntax inside DSL expressions. Inline enum duplicate,
+   empty-value, UTF-8/NUL, and default rules are implemented (section 15).
 8. Composite uniqueness with nulls-equal semantics and naming of expanded objects.
 9. Trigger SQL, no-op-update behavior, recursion safety, and row targeting.
 10. Constraint restrictions in reusable types: value checks versus structural rules
     such as uniqueness or index directives.
 11. Whether aliases of `int` receive exactly the same automatic-PK behavior.
-12. Defaults on PK+FK fields: the no-generation rule is settled, but explicit
-    default policy still needs clarification.
-13. Connection-header role rules: mixed named/unnamed endpoints, duplicate role
-    names, and general headers with non-`id` target keys.
+12. Future reusable-type defaults on keys. Current PK+FK fields permit
+    inherited-type-compatible defaults and never generate IDs (section 9).
+13. Future unnamed role/self/multi-endpoint headers. Named header role rules and
+    generated keys from non-`id` PK names are implemented (section 14).
 14. How to name a primary-key constraint without introducing a conflicting scope.
-15. Generated SQL ordering, validation strategy, and compiler output/error contract.
+15. Future trigger ordering, CLI output, and live SQLite validation. Current
+    schema preflight precedes output; tables precede indexes; writer failures
+    may leave partial output (section 20).
 
 ## 24. Deferred beyond v1
 
@@ -2266,5 +2299,5 @@ These are not new agreed requirements; they are gaps worth resolving explicitly.
 - `as` naming syntax and non-braced index/constraint option bodies.
 - Automatic enforcement that every target has a reverse one-to-one row.
 
-Role-named, self, and multi-endpoint connections are **not** deferred beyond v1;
-they are planned for its later implementation stages.
+Named role/self/multi-endpoint connections are implemented, including generated
+keys and overrides. Their unnamed variants remain unsupported future design.
