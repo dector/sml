@@ -85,7 +85,7 @@ test "snake conversion acronym boundaries and normal camel Pascal names" {
 }
 
 test "unknown builtin aliases and unmodeled reusable references report type token span" {
-    for ([_][]const u8{ "Money", "boolean", "date", "text", "string", "Int", "str[]" }) |name| {
+    for ([_][]const u8{ "Money", "boolean", "Date", "text", "string", "Int", "str[]" }) |name| {
         var f = field("value", name);
         f.type.name.span = .{ .start = 40, .end = 45 };
         try expectDiagnostic(.{ .tables = &.{table("T", &.{f})} }, .unknown_type, f.type.name.span);

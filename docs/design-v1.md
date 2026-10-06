@@ -1701,7 +1701,18 @@ explicit #name options for repeated column lists.
 birthDate date
 ```
 
-Store validated `YYYY-MM-DD` text. No timezone is attached to a date.
+Implemented: logical `date` stores exactly ten ASCII characters `YYYY-MM-DD`
+as SQLite STRICT `TEXT`. Years are `0001`–`9999`, with real proleptic Gregorian
+calendar days and century leap-year rules. No timezone is attached to a date.
+Decoded ordinary/raw string defaults are validated. Raw SQL defaults remain
+trusted but must pass runtime format/calendar CHECKs. These checks use character
+length, explicit NUL rejection, ASCII GLOB and calendar arithmetic in all SQLite
+encodings, not permissive SQLite date functions. Nullable SQL NULL passes;
+nonnullable NULL fails. Date keys are ordinary non-auto keys; `#allow reuse` is
+integer-only. Foreign keys inherit the logical date type and validation.
+Date comparisons accept canonical string literals or other dates, not datetime
+or ordinary string fields. Canonical text sorts chronologically. No date
+generator exists (`::now` remains datetime-only).
 
 ### Datetime
 
@@ -1730,7 +1741,8 @@ explicit format, range, and calendar CHECK constraints, not permissive SQLite
 date functions. Nullable NULL passes; nonnullable NULL fails. Datetime primary
 keys never generate integer IDs; `#allow reuse` is integer-only.
 Fixed-format UTC text sorts chronologically. Reusable types remain indefinitely
-deferred; date, JSON, enums, and update generators are not part of this slice.
+deferred. Date and enum support are now implemented separately; JSON and update
+generators remain outside this datetime slice.
 
 ### Companion timezone field
 

@@ -40,6 +40,7 @@ test {
     _ = @import("foreign_key_index_test.zig");
     _ = @import("boolean_test.zig");
     _ = @import("datetime_test.zig");
+    _ = @import("date_test.zig");
     _ = @import("enum_test.zig");
     _ = @import("check_test.zig");
     _ = @import("unique_test.zig");

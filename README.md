@@ -20,7 +20,11 @@ Supported: braced tables, stored fields, `!` keys, nullable `?`, literal default
 `=` with exactly two extra spaces. The string type is `str`, not `text` or
 `string`. Boolean defaults use `true`/`false`; `bool` cannot be a primary key.
 `datetime` accepts whole-second UTC `YYYY-MM-DDTHH:MM:SSZ` and insertion-time
-`::now`. Inline `enum` fields use one or more field-level `#of` comma lists,
+`::now`. `date` accepts exactly ASCII `YYYY-MM-DD`, years `0001`–`9999`,
+with Gregorian leap-day validation and no timezone or generator. Dates use TEXT
+with runtime format/calendar checks (including raw SQL defaults), support nullable
+NULL and ordinary keys/FKs, and compare only with dates or canonical date string
+literals, not datetime or ordinary string fields. Inline `enum` fields use one or more field-level `#of` comma lists,
 TEXT storage, and allowed-value checks. Bare enum words match
 `[A-Za-z_][A-Za-z0-9_-]*`; backticks mean enum text, including in defaults.
 Use whitespace before a `--` comment after a bare enum value (`a--b` is text).
@@ -349,8 +353,8 @@ Operand typing (logical types, not SQLite storage coercions):
 | Operators | Accepted DSL operands |
 | --- | --- |
 | `!`, `&&`, `||` | Boolean (including nullable Boolean references), not an untyped `null` literal |
-| `==`, `!=` | Same family: numeric (int/real), text (str/enum), datetime, Boolean, blob references; or either operand a `null` literal |
-| `<`, `<=`, `>`, `>=` | Numeric, text, or datetime family only |
+| `==`, `!=` | Same family: numeric (int/real), text (str/enum), date, datetime, Boolean, blob references; or either operand a `null` literal |
+| `<`, `<=`, `>`, `>=` | Numeric, text, date, or datetime family only |
 
 Datetime also compares with a valid canonical `YYYY-MM-DDTHH:MM:SSZ` string
 literal on either side, not a str/enum reference. Enum values compare as text;
@@ -395,6 +399,7 @@ zig build test
 zig fmt --check build.zig build.zig.zon src
 python3 src/testdata/boolean_runtime_test.py
 python3 src/testdata/datetime_runtime_test.py
+python3 src/testdata/date_runtime_test.py
 python3 src/testdata/encoding_runtime_test.py
 python3 src/testdata/enum_runtime_test.py
 python3 src/testdata/expression_runtime_test.py

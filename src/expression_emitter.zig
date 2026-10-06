@@ -33,6 +33,11 @@ fn validate(expression: *const resolved.Expression, depth: usize) Error!void {
     }
     // Validate tags before switching, including directly constructed models.
     if (!validEnum(std.meta.activeTag(expression.kind))) return error.InvalidExpression;
+    if (expression.kind == .text) {
+        if (expression.type_info) |info| {
+            if (info.type == .date and !@import("date.zig").valid(expression.kind.text)) return error.InvalidLiteral;
+        }
+    }
     switch (expression.kind) {
         .real => |number| if (!std.math.isFinite(number)) return error.InvalidLiteral,
         .identifier, .current_value => |reference| {
@@ -54,7 +59,11 @@ fn validate(expression: *const resolved.Expression, depth: usize) Error!void {
             const has_null = isNull(binary.left) or isNull(binary.right);
             switch (binary.operator) {
                 .is_null, .is_not_null => if (!has_null) return error.InvalidExpression,
-                .equal, .not_equal, .less_than, .less_than_or_equal, .greater_than, .greater_than_or_equal => if (has_null) return error.InvalidExpression,
+                .equal, .not_equal, .less_than, .less_than_or_equal, .greater_than, .greater_than_or_equal => {
+                    if (has_null) return error.InvalidExpression;
+                    try validateDatePeer(binary.left, binary.right);
+                    try validateDatePeer(binary.right, binary.left);
+                },
                 else => {},
             }
         },
@@ -63,6 +72,21 @@ fn validate(expression: *const resolved.Expression, depth: usize) Error!void {
 }
 
 // Only called after all children passed the depth guard (also bounds cycles).
+fn validateDatePeer(left: *const resolved.Expression, right: *const resolved.Expression) Error!void {
+    const info = left.type_info orelse return;
+    if (info.type != .date) return;
+    var peer = right;
+    while (peer.kind == .grouping) peer = peer.kind.grouping;
+    if (peer.kind == .raw_sql) return;
+    if (peer.kind == .text) {
+        if (!@import("date.zig").valid(peer.kind.text)) return error.InvalidLiteral;
+        if (peer.type_info) |p| if (p.type != .text and p.type != .date) return error.InvalidExpression;
+        return;
+    }
+    if (right.type_info) |p| if (p.type == .date) return;
+    return error.InvalidExpression;
+}
+
 fn isNull(expression: *const resolved.Expression) bool {
     var node = expression;
     while (node.kind == .grouping) node = node.kind.grouping;

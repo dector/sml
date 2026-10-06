@@ -216,25 +216,30 @@ const Worker = struct {
             for ([_]*const resolved.Expression{ left, right }) |operand| {
                 if (operand.type_info) |info| {
                     if (info.type == .boolean or info.type == .blob)
-                        return self.fail(.incompatible_operands, operand.span, "ordering requires numeric, text/enum, or datetime operands; Boolean and blob cannot be ordered");
+                        return self.fail(.incompatible_operands, operand.span, "ordering requires numeric, text/enum, date, or datetime operands; Boolean and blob cannot be ordered");
                 }
             }
         }
         const l = if (left.type_info) |info| info.type else return lowered;
         const r = if (right.type_info) |info| info.type else return lowered;
-        if (l == .datetime and r == .text and ungroup(right).kind == .text) {
-            try self.datetimeLiteral(right);
+        if ((l == .datetime or l == .date) and r == .text and ungroup(right).kind == .text) {
+            try self.calendarLiteral(right, l);
             return lowered;
         }
-        if (r == .datetime and l == .text and ungroup(left).kind == .text) {
-            try self.datetimeLiteral(left);
+        if ((r == .datetime or r == .date) and l == .text and ungroup(left).kind == .text) {
+            try self.calendarLiteral(left, r);
             return lowered;
         }
         if (l == r or (numeric(l) and numeric(r)) or (textual(l) and textual(r))) return lowered;
-        return self.fail(.incompatible_operands, span, "comparison requires matching logical families: numeric, text/enum, datetime, Boolean equality, or blob-reference equality");
+        return self.fail(.incompatible_operands, span, "comparison requires matching logical families: numeric, text/enum, date, datetime, Boolean equality, or blob-reference equality");
     }
 
-    fn datetimeLiteral(self: *Worker, operand: *const resolved.Expression) Error!void {
+    fn calendarLiteral(self: *Worker, operand: *const resolved.Expression, storage: resolved.StorageType) Error!void {
+        if (storage == .date) {
+            if (!@import("date.zig").valid(ungroup(operand).kind.text))
+                return self.fail(.invalid_literal, operand.span, "date comparison literal must be a valid canonical Gregorian YYYY-MM-DD day");
+            return;
+        }
         if (!datetime.valid(ungroup(operand).kind.text))
             return self.fail(.invalid_literal, operand.span, "datetime comparison literal must be a valid canonical UTC YYYY-MM-DDTHH:MM:SSZ timestamp");
     }

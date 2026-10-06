@@ -126,7 +126,7 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
             try writer.writeAll(switch (column.type) {
                 .integer, .boolean => "INTEGER",
                 .real => "REAL",
-                .text, .datetime, .enumeration => "TEXT",
+                .text, .date, .datetime, .enumeration => "TEXT",
                 .blob => "BLOB",
             });
             if (column.foreign_key == null and column.primary_key != .none and key_count == 1 and column.type == .integer) {
@@ -156,8 +156,9 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
                 try writeIdentifier(writer, column.sql_name);
                 try writer.writeAll(" IN (0, 1))");
             }
-            if (column.type == .datetime) {
-                var pieces = std.mem.splitScalar(u8, @import("datetime.zig").check, '@');
+            if (column.type == .datetime or column.type == .date) {
+                const check = if (column.type == .date) @import("date.zig").check else @import("datetime.zig").check;
+                var pieces = std.mem.splitScalar(u8, check, '@');
                 try writer.writeAll(pieces.next().?);
                 while (pieces.next()) |piece| {
                     try writeIdentifier(writer, column.sql_name);
@@ -320,6 +321,7 @@ fn validateDefault(column: resolved.Column, value: resolved.Default) Error!void 
         .boolean => column.type == .boolean,
         .real => |number| column.type == .real and std.math.isFinite(number),
         .text => |text| column.type == .text or (column.type == .enumeration and @import("enumeration.zig").contains(column.enum_values, text)),
+        .date => |text| column.type == .date and @import("date.zig").valid(text),
         .datetime => |text| column.type == .datetime and @import("datetime.zig").valid(text),
         .now => column.type == .datetime,
         .blob => column.type == .blob,
@@ -335,7 +337,7 @@ fn writeDefault(writer: *std.Io.Writer, value: resolved.Default) std.Io.Writer.E
         .boolean => |value_bool| try writer.writeAll(if (value_bool) "1" else "0"),
         .real => |number| try writer.print("{d}", .{number}),
         .now => try writer.writeAll("(strftime('%Y-%m-%dT%H:%M:%SZ','now'))"),
-        .text, .datetime => |text| try writeText(writer, text),
+        .text, .date, .datetime => |text| try writeText(writer, text),
         .blob => |bytes| try writeBlob(writer, bytes),
         .null_value => try writer.writeAll("NULL"),
         .raw_sql => |sql| {
@@ -589,7 +591,7 @@ test "non-integer primary keys are required and do not generate IDs" {
             .text => @embedFile("testdata/emitter/text_primary_key.expect.sql"),
             .real => @embedFile("testdata/emitter/real_primary_key.expect.sql"),
             .blob => @embedFile("testdata/emitter/blob_primary_key.expect.sql"),
-            .integer, .boolean, .datetime, .enumeration => unreachable,
+            .integer, .boolean, .date, .datetime, .enumeration => unreachable,
         };
         try std.testing.expectEqualStrings(expected, output.written());
     }
@@ -664,7 +666,7 @@ test "integer primary keys with and without ID reuse" {
 }
 
 test "ID reuse on non-integer primary keys fails before writing" {
-    for ([_]resolved.StorageType{ .text, .real, .blob, .datetime }) |storage_type| {
+    for ([_]resolved.StorageType{ .text, .real, .blob, .date, .datetime }) |storage_type| {
         var output = std.Io.Writer.Allocating.init(std.testing.allocator);
         defer output.deinit();
         try std.testing.expectError(error.InvalidIdReuse, emit(.{ .tables = &.{

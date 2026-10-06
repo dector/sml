@@ -250,7 +250,7 @@ const Context = struct {
                     if (std.ascii.eqlIgnoreCase(previous.sql_name, column_name))
                         return self.fail(.sql_name_collision, if (field_opts.name) |n| n.span else field.name.span, "SQL column names collide (ASCII case-insensitive)");
                 }
-                const storage: resolved.StorageType = if (std.mem.eql(u8, concrete.type.name.text, "int")) .integer else if (std.mem.eql(u8, concrete.type.name.text, "real")) .real else if (std.mem.eql(u8, concrete.type.name.text, "str")) .text else if (std.mem.eql(u8, concrete.type.name.text, "blob")) .blob else if (std.mem.eql(u8, concrete.type.name.text, "bool")) .boolean else if (std.mem.eql(u8, concrete.type.name.text, "datetime")) .datetime else if (std.mem.eql(u8, concrete.type.name.text, "enum")) .enumeration else return self.fail(.unknown_type, concrete.type.name.span, "unknown type; supported builtins are int, real, str, blob, bool, datetime, enum");
+                const storage: resolved.StorageType = if (std.mem.eql(u8, concrete.type.name.text, "int")) .integer else if (std.mem.eql(u8, concrete.type.name.text, "real")) .real else if (std.mem.eql(u8, concrete.type.name.text, "str")) .text else if (std.mem.eql(u8, concrete.type.name.text, "blob")) .blob else if (std.mem.eql(u8, concrete.type.name.text, "bool")) .boolean else if (std.mem.eql(u8, concrete.type.name.text, "date")) .date else if (std.mem.eql(u8, concrete.type.name.text, "datetime")) .datetime else if (std.mem.eql(u8, concrete.type.name.text, "enum")) .enumeration else return self.fail(.unknown_type, concrete.type.name.span, "unknown type; supported builtins are int, real, str, blob, bool, date, datetime, enum");
                 var enum_values: std.ArrayList([]const u8) = .empty;
                 for (concrete.directives) |directive| {
                     if (directive.kind == .of) {
@@ -674,7 +674,7 @@ const Context = struct {
             .integer => storage == .integer or storage == .real,
             .boolean => storage == .boolean,
             .real => storage == .real,
-            .text => storage == .text or storage == .datetime,
+            .text => storage == .text or storage == .datetime or storage == .date,
             .generator => storage == .datetime,
             .null_value => nullable,
             .enum_text => storage == .enumeration,
@@ -688,6 +688,11 @@ const Context = struct {
             .real => .{ .real = try literals.real(self, token) },
             .text => blk: {
                 const text = try self.string(token);
+                if (storage == .date) {
+                    if (!@import("date.zig").valid(text))
+                        return self.fail(.invalid_literal, token.span, "date requires a real Gregorian YYYY-MM-DD day (years 0001-9999)");
+                    break :blk .{ .date = text };
+                }
                 if (storage == .datetime) {
                     if (!@import("datetime.zig").valid(text))
                         return self.fail(.invalid_literal, token.span, "datetime requires a real UTC date in YYYY-MM-DDTHH:MM:SSZ format (years 0001-9999)");

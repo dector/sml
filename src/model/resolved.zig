@@ -43,11 +43,12 @@ pub const Endpoint = struct {
     column_index: ?usize = null,
 };
 
-/// Logical column types. Boolean uses INTEGER; datetime and enumeration use TEXT.
+/// Logical column types. Boolean uses INTEGER; date, datetime and enumeration use TEXT.
 pub const StorageType = enum {
     integer,
     boolean,
     datetime,
+    date,
     enumeration,
     real,
     text,
@@ -70,6 +71,7 @@ pub const Default = union(enum) {
     integer: i64,
     boolean: bool,
     datetime: []const u8,
+    date: []const u8,
     now,
     real: f64,
     text: []const u8,
