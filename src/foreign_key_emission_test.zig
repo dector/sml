@@ -30,6 +30,17 @@ fn pipeline(allocator: std.mem.Allocator) !void {
     try pipelineFixture(allocator, "foreign_keys");
 }
 
+fn contextualNamesPipeline(allocator: std.mem.Allocator) !void {
+    try pipelineFixture(allocator, "foreign_key_contextual_names");
+    try pipelineFixture(allocator, "foreign_key_enum_name");
+}
+
+test "contextual FK target names inherit actual default types and exact SQL names" {
+    try contextualNamesPipeline(std.testing.allocator);
+    var backing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .resize_fail_index = 0 });
+    try std.testing.checkAllAllocationFailures(backing.allocator(), contextualNamesPipeline, .{});
+}
+
 fn sharedPipeline(allocator: std.mem.Allocator) !void {
     try pipelineFixture(allocator, "shared_identity");
 }

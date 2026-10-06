@@ -73,4 +73,24 @@ for table, action in [('cascade_child', 'CASCADE'), ('null_child', 'SET NULL')]:
     fk = db.execute(f'PRAGMA foreign_key_list({table})').fetchone()
     assert fk[5:7] == ('NO ACTION', action)
 assert not list(db.execute('PRAGMA foreign_key_check'))
+# Contextual DSL names do not determine the inherited storage/default type.
+for fixture, parents, expected in [
+    ('foreign_key_contextual_names',
+     [('Enum Exact', 1), ('Datetime Exact', 2), ('Str Exact', "it's ready")],
+     (1, 2, "it's ready")),
+    ('foreign_key_enum_name',
+     [('Enum Exact', 'ready'), ('Enum Exact', "it's ready")],
+     ('ready', "it's ready")),
+]:
+    db = sqlite3.connect(':memory:')
+    db.execute('PRAGMA foreign_keys = ON')
+    db.executescript((pathlib.Path(__file__).parent / 'parser' /
+                      f'{fixture}.expect.sql').read_text())
+    rejected('INSERT INTO child DEFAULT VALUES')
+    for table, key in parents:
+        db.execute(f'INSERT INTO "{table}" VALUES (?)', (key,))
+    db.execute('INSERT INTO child DEFAULT VALUES')
+    assert db.execute('SELECT * FROM child').fetchone() == expected
+    assert not list(db.execute('PRAGMA foreign_key_check'))
+    db.close()
 print('foreign key runtime checks passed')

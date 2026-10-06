@@ -170,7 +170,7 @@ const Parser = struct {
             try self.advance();
         }
         const type_span: parsed.Span = .{ .start = type_name.span.start, .end = end };
-        const is_enum = std.mem.eql(u8, type_name.text, "enum");
+        const is_enum = !foreign_key and std.mem.eql(u8, type_name.text, "enum");
         var default: ?parsed.Default = null;
         if (self.current.kind == .l_paren) {
             // FK target types are not known until resolution; preserve enum words.
