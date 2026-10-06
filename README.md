@@ -545,6 +545,44 @@ This is **deterministic mutation fuzzing, not coverage-guided fuzzing**. Zig
 0.17 provides `std.testing.fuzz` with a `Smith` callback API, but this harness
 has no native coverage-guided target and requires no additional dependencies.
 
+### CLI + SQLite fuzz oracle
+
+```sh
+zig build
+python3 src/testdata/fuzz_runtime_test.py
+python3 src/testdata/fuzz_runtime_test.py --seed 5265996 --iterations 10000 --failure-dir /tmp/pzl-sql-failures
+# Optional: use a separately built compiler without rebuilding an active campaign.
+python3 src/testdata/fuzz_runtime_test.py --compiler /path/to/sml --iterations 500
+```
+
+This separate Python stdlib harness defaults to **500** cases, with a **5-second
+per-compiler-call timeout**. It does not build, modify fixtures, or invoke the Zig
+fuzz campaign. It sends exact bytes to the real CLI using `-- -` and accepts only
+exit statuses 0 (compiled) or 1 (diagnostic); crashes, timeouts and status 2 fail.
+Half the cases generate known-valid DSL without trusted raw SQL. Those must
+compile, decode as strict UTF-8, and execute their PRAGMA/DDL in a fresh SQLite
+in-memory database. Generation varies typed expressions, defaults, checks,
+indexes, named constraints, enums, dates, FKs, backrefs and generated connections.
+It executes no inserts or runtime queries, so it is not a data-semantics oracle.
+
+Other cases mutate sorted parser fixtures, arbitrary bytes, or generated literal,
+name and comment boundaries, including NUL, controls and malformed UTF-8. These
+are explicitly **status-only**: arbitrary mutations can turn trusted raw SQL
+into invalid SQL, and documentation preserves non-UTF-8 source bytes. Successful
+non-UTF-8 output is counted as an observation, not a contract failure. A concrete
+example from `/tmp/pzl-fuzz-seed-5265996-index-695.pzl` reduces to the exact Python
+bytes `b'--- \xff\nA {\n  n int\n}\n'`: compilation succeeds and the emitted SQL
+comment contains byte `0xff`. Strict UTF-8 decoding therefore fails before SQLite
+can execute it. No production-policy change or replacement-decoding is implied.
+
+Failures print escaped metadata (and `repr` input when no artifact directory is
+requested). With `--failure-dir`, each failure creates an exclusive directory
+containing exact `source.pzl`, `stdout.bin`, `stderr.bin` and seed/index/status
+metadata; existing artifacts are never overwritten. No files are written on
+success. To replay an index, rerun with the same seed, compiler, harness and
+fixture revisions, and at least `index + 1` iterations. This is deterministic
+mutation/generation fuzzing, **not coverage-guided fuzzing**.
+
 ## Development
 
 Use Zig 0.17.0.
