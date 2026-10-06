@@ -97,23 +97,21 @@ test "stored FK rejects reversed repeated incomplete markers and composite refer
     inline for (cases) |case| try failureCase(std.testing.allocator, case[0], case[1], case[2]);
 }
 
-fn unsupportedCase(allocator: std.mem.Allocator, input: []const u8) !void {
+fn sharedIdentityCase(allocator: std.mem.Allocator, input: []const u8) !void {
     var syntax = try parser.parse(allocator, input);
     try std.testing.expect(syntax == .schema);
     defer syntax.schema.deinit();
     var result = try resolver.resolve(allocator, syntax.schema.schema);
-    if (result == .schema) {
-        result.schema.deinit();
-        return error.ExpectedUnsupportedFeature;
-    }
-    try std.testing.expectEqual(resolver.Category.unsupported_feature, result.diagnostic.category);
-    try std.testing.expectEqualStrings("Primary-key foreign keys (shared identity) are not supported until StoredFK Slice5", result.diagnostic.message);
-    const field = syntax.schema.schema.tables[0].fields[0];
-    try std.testing.expectEqual(field.span, result.diagnostic.span);
+    try std.testing.expect(result == .schema);
+    defer result.schema.deinit();
+    const field = result.schema.schema.tables[0].columns[0];
+    try std.testing.expectEqual(resolved.PrimaryKey.standard, field.primary_key);
+    try std.testing.expectEqual(resolved.StorageType.integer, field.type);
+    try std.testing.expect(!field.nullable);
 }
 
-test "stored FK primary shared identity remains unsupported" {
-    try unsupportedCase(std.testing.allocator, "Label {\n  *!owner Owner\n}\nOwner {\n  !id int\n}\n");
+test "stored FK primary shared identity resolves" {
+    try sharedIdentityCase(std.testing.allocator, "Label {\n  *!owner Owner\n}\nOwner {\n  !id int\n}\n");
 }
 
 test "FK metadata defaults and inherited logical types remain separate from PK policy" {
@@ -134,10 +132,10 @@ test "FK metadata defaults and inherited logical types remain separate from PK p
     try std.testing.expectEqual(resolved.PrimaryKey.standard, column.primary_key);
 }
 
-test "FK syntax and unsupported resolution reclaim every allocation failure" {
+test "FK syntax and shared identity resolution reclaim every allocation failure" {
     // Disable in-place arena growth to keep failure-sweep counts deterministic.
     var backing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .resize_fail_index = 0 });
     try std.testing.checkAllAllocationFailures(backing.allocator(), syntaxCase, .{});
-    try std.testing.checkAllAllocationFailures(backing.allocator(), unsupportedCase, .{"Label {\n  *!owner Owner\n}\nOwner {\n  !id int\n}\n"});
+    try std.testing.checkAllAllocationFailures(backing.allocator(), sharedIdentityCase, .{"Label {\n  *!owner Owner\n}\nOwner {\n  !id int\n}\n"});
     try std.testing.checkAllAllocationFailures(backing.allocator(), failureCase, .{ "T {\n  --- Owner.\n  *!", 21, 21 });
 }

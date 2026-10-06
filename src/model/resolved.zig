@@ -38,6 +38,7 @@ pub const StorageType = enum {
 /// Primary-key membership and ID generation policy.
 pub const PrimaryKey = enum {
     none,
+    /// Single integer keys generate IDs only when foreign_key is null.
     standard,
     /// `#allow reuse`: omit AUTOINCREMENT on a single integer primary key.
     allow_reuse,

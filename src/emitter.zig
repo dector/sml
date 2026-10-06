@@ -7,7 +7,7 @@ const writeBlob = sql_writer.writeBlob;
 const resolved = @import("model/resolved.zig");
 const expression_emitter = @import("expression_emitter.zig");
 
-pub const Error = expression_emitter.Error || error{ NullablePrimaryKey, InvalidPrimaryKey, InvalidIdReuse, InvalidDefault, InvalidEnum, DefaultOnAutoPrimaryKey, InvalidCheck, InvalidUnique, InvalidIndex, SqlNameCollision, UnsupportedForeignKey, InvalidForeignKey };
+pub const Error = expression_emitter.Error || error{ NullablePrimaryKey, InvalidPrimaryKey, InvalidIdReuse, InvalidDefault, InvalidEnum, DefaultOnAutoPrimaryKey, InvalidCheck, InvalidUnique, InvalidIndex, SqlNameCollision, InvalidForeignKey };
 
 /// Emit tables and columns in schema order, then ordered table CHECK items.
 /// Zero-column tables (even checks-only tables) remain non-executable skeletons.
@@ -15,7 +15,7 @@ pub const Error = expression_emitter.Error || error{ NullablePrimaryKey, Invalid
 /// NUL-containing SQL names, invalid primary keys, ID reuse options, and literal
 /// defaults and enum metadata are rejected before writing. Foreign-key metadata
 /// must match a single real primary key and its logical type/enum value set.
-/// Shared primary-key FKs and non-RESTRICT actions remain unsupported.
+/// Single integer shared primary-key FKs use WITHOUT ROWID to require identity.
 /// Raw SQL is trusted
 /// and not syntax-validated, including direct resolved enum raw-SQL defaults.
 /// Writer failures may leave partial output. The caller owns and flushes the writer.
@@ -100,7 +100,7 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
                 if (@import("expression_resolver.zig").validateCheckResult(&check) != null) return error.InvalidCheck;
             }
             if (column.default) |value| {
-                if (column.primary_key != .none and key_count == 1 and column.type == .integer)
+                if (column.foreign_key == null and column.primary_key != .none and key_count == 1 and column.type == .integer)
                     return error.DefaultOnAutoPrimaryKey;
                 try validateDefault(column, value);
             }
@@ -127,7 +127,7 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
                 .text, .datetime, .enumeration => "TEXT",
                 .blob => "BLOB",
             });
-            if (column.primary_key != .none and key_count == 1 and column.type == .integer) {
+            if (column.foreign_key == null and column.primary_key != .none and key_count == 1 and column.type == .integer) {
                 try writer.writeAll(" PRIMARY KEY");
                 if (column.primary_key == .standard) try writer.writeAll(" AUTOINCREMENT");
             } else {
@@ -224,7 +224,10 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
             if (index + 1 < table.unique_constraints.len) try writer.writeByte(',');
             try writer.writeByte('\n');
         }
-        try writer.writeAll(") STRICT;\n");
+        const without_rowid = for (table.columns) |column| {
+            if (key_count == 1 and column.primary_key != .none and column.type == .integer and column.foreign_key != null) break true;
+        } else false;
+        try writer.writeAll(if (without_rowid) ") STRICT, WITHOUT ROWID;\n" else ") STRICT;\n");
     }
     for (schema.tables) |table| for (table.indexes) |index| {
         try writer.writeAll(if (index.unique) "\nCREATE UNIQUE INDEX " else "\nCREATE INDEX ");
@@ -246,7 +249,7 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
 }
 
 fn validateForeignKey(schema: resolved.Schema, column: resolved.Column, fk: resolved.ForeignKey) Error!void {
-    if (column.primary_key != .none) return error.UnsupportedForeignKey;
+    if (column.primary_key == .allow_reuse) return error.InvalidIdReuse;
     if (fk.delete_action == .set_null and !column.nullable) return error.InvalidForeignKey;
     for ([_][]const u8{ fk.target_table_sql_name, fk.target_column_sql_name }) |name| {
         if (name.len == 0 or std.mem.indexOfScalar(u8, name, 0) != null) return error.InvalidIdentifier;

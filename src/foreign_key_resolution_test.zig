@@ -109,7 +109,7 @@ test "FK target diagnostics and inherited default validation have precise spans"
         .{ "C {\n *p P? =\n   #onDelete unknown\n}\nP {\n !id int\n}\n", .invalid_foreign_key_action, "unknown" },
         .{ "C {\n *p P? =\n   #onDelete cascade\n   #onDelete restrict\n}\nP {\n !id int\n}\n", .duplicate_directive, "#onDelete restrict" },
         .{ "C {\n *!p P? =\n   #onDelete setNull\n}\nP {\n !id int\n}\n", .nullable_primary_key, "P?" },
-        .{ "C {\n *!p P =\n   #onDelete setNull\n}\nP {\n !id int\n}\n", .unsupported_feature, "*!p P =\n   #onDelete setNull" },
+        .{ "C {\n *!p P =\n   #onDelete setNull\n}\nP {\n !id int\n}\n", .invalid_foreign_key_action, "#onDelete setNull" },
         .{ "C {\n *p P\n}\nP {\n value int\n}\n", .invalid_foreign_key_target, "P" },
         .{ "C {\n *p P\n}\nP {\n !a int\n !b int\n}\n", .invalid_foreign_key_target, "P" },
         .{ "C {\n *p P\n}\nP {\n !a bool\n}\n", .invalid_primary_key, "bool" },
@@ -121,7 +121,8 @@ test "FK target diagnostics and inherited default validation have precise spans"
         .{ "C {\n *p P =\n   #allow reuse\n}\nP {\n !a int\n}\n", .invalid_id_reuse, "#allow reuse" },
         .{ "C {\n *!p P =\n   #allow reuse\n}\nP {\n !a int\n}\n", .invalid_id_reuse, "#allow reuse" },
         .{ "C {\n *p P =\n   #of yes\n}\nP {\n !a int\n}\n", .invalid_directive_scope, "#of yes" },
-        .{ "C {\n *p P\n}\nP {\n *!key Q\n}\nQ {\n !key str\n}\n", .unsupported_feature, "*!key Q" },
+        .{ "C {\n *!p P('bad')\n}\nP {\n !key int\n}\n", .invalid_default, "'bad'" },
+        .{ "C {\n *!p P(null)\n}\nP {\n !key int\n}\n", .invalid_default, "null" },
         .{ "C {\n *p P\n}\nP {\n *!key Q\n}\nQ {\n *!key P\n}\n", .foreign_key_cycle, "Q" },
         .{ "P {\n *!key P\n}\n", .foreign_key_cycle, "P" },
     };

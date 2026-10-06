@@ -19,8 +19,8 @@ these syntax decisions require implementation updates, not just resolver changes
 - SQL output, not an ORM or query generator.
 - Fresh-schema creation, not migrations.
 - Stored foreign-key syntax, target/type resolution, SQL emission, and deletion
-  actions are implemented (StoredFK Slice4). Shared-PK FKs, backrefs, and generated
-  connection tables remain planned.
+  actions and shared-PK identity are implemented (StoredFK Slice5). Automatic FK
+  indexes are next; backrefs and generated connection tables remain planned.
 - Inline enums are implemented. Reusable types (including named enums) are
   deferred indefinitely; their examples below are design sketches, not supported syntax.
 - Role-named and multi-endpoint connections are included toward the end of v1.
@@ -676,7 +676,12 @@ CREATE TABLE "user_settings" (
 
 This allows at most one settings row per user, without a redundant settings ID.
 It does not require every user to have settings. Omitting `user` fails instead of
-generating a potentially unrelated parent ID.
+generating a potentially unrelated parent ID. Explicit NULL also fails.
+Type-compatible defaults are allowed, but must reference an existing parent at
+runtime. `#allow reuse` is invalid on every FK. Noninteger PK+FKs (including enum
+and datetime) use ordinary STRICT tables with NOT NULL keys. Composite PKs with
+FK parts also use ordinary STRICT tables: every part is NOT NULL and no part
+uses AUTOINCREMENT. Ordinary single integer PKs retain automatic ID generation.
 
 The language does not yet expose a general-purpose `WITHOUT ROWID` directive.
 Its use for other table shapes is an implementation decision to document later.
@@ -952,8 +957,10 @@ available to checks, uniqueness, and indexes. Resolved FK metadata owns the
 exact target SQL table/column names (including `#name`) and defaults to restrict.
 PK type dependencies may traverse forward FK chains; cycles without a concrete
 storage type are diagnosed. A self-FK to an ordinary integer PK is valid.
-`*!field` syntax parses, but shared-identity resolution remains unsupported
-until Slice5; `#allow reuse` is invalid on all FKs. SQL emits quoted REFERENCES
+`*!field` resolves shared identity, including PK+FK chains to concrete storage
+types. Single integer PK+FK tables use STRICT, WITHOUT ROWID; other shared keys
+use ordinary STRICT tables with NOT NULL PK parts. Shared keys never generate
+IDs and permit type-compatible defaults. `#allow reuse` is invalid on all FKs. SQL emits quoted REFERENCES
 with ON DELETE RESTRICT (default), CASCADE, or SET NULL. Field `#onDelete`
 accepts only restrict/cascade/setNull; duplicates, unknown actions, and table or
 non-FK scope are diagnosed. setNull requires local nullability, also enforced by

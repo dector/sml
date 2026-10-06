@@ -4,8 +4,8 @@ const resolver = @import("resolver.zig");
 const emitter = @import("emitter.zig");
 const resolved = @import("model/resolved.zig");
 
-fn pipeline(allocator: std.mem.Allocator) !void {
-    const source = try allocator.dupe(u8, @embedFile("testdata/parser/foreign_keys.pzl"));
+fn pipelineFixture(allocator: std.mem.Allocator, comptime fixture: []const u8) !void {
+    const source = try allocator.dupe(u8, @embedFile("testdata/parser/" ++ fixture ++ ".pzl"));
     defer allocator.free(source);
     var syntax = try parser.parse(allocator, source);
     try std.testing.expect(syntax == .schema);
@@ -23,7 +23,21 @@ fn pipeline(allocator: std.mem.Allocator) !void {
         error.WriteFailed => return error.OutOfMemory,
         else => return err,
     };
-    try std.testing.expectEqualStrings(@embedFile("testdata/parser/foreign_keys.expect.sql"), sql.written());
+    try std.testing.expectEqualStrings(@embedFile("testdata/parser/" ++ fixture ++ ".expect.sql"), sql.written());
+}
+
+fn pipeline(allocator: std.mem.Allocator) !void {
+    try pipelineFixture(allocator, "foreign_keys");
+}
+
+fn sharedPipeline(allocator: std.mem.Allocator) !void {
+    try pipelineFixture(allocator, "shared_identity");
+}
+
+test "shared identity fixture owns inherited chain types and survives OOM" {
+    try sharedPipeline(std.testing.allocator);
+    var backing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .resize_fail_index = 0 });
+    try std.testing.checkAllAllocationFailures(backing.allocator(), sharedPipeline, .{});
 }
 
 test "stored FK fixture, forward mutual and self references, ownership and OOM" {
@@ -40,6 +54,33 @@ fn reject(local: resolved.Column, parents: []const resolved.Column, expected: an
         .{ .dsl_name = "P", .sql_name = "P", .columns = parents },
     } }, &sql.writer));
     try std.testing.expectEqual(@as(usize, 0), sql.written().len);
+}
+
+test "public shared PK FK chain metadata validates each real target before output" {
+    const key: resolved.Column = .{ .dsl_name = "id", .sql_name = "id", .type = .text, .primary_key = .standard };
+    var middle = key;
+    middle.foreign_key = .{ .target_table_sql_name = "Base", .target_column_sql_name = "ID" };
+    var local = key;
+    local.primary_key = .none;
+    local.foreign_key = .{ .target_table_sql_name = "Middle", .target_column_sql_name = "ID" };
+    for ([_]bool{ false, true }) |invalid| {
+        middle.foreign_key.?.target_column_sql_name = if (invalid) "missing" else "ID";
+        var sql = std.Io.Writer.Allocating.init(std.testing.allocator);
+        defer sql.deinit();
+        const schema: resolved.Schema = .{ .tables = &.{
+            .{ .dsl_name = "Local", .sql_name = "Local", .columns = &.{local} },
+            .{ .dsl_name = "Middle", .sql_name = "Middle", .columns = &.{middle} },
+            .{ .dsl_name = "Base", .sql_name = "Base", .columns = &.{key} },
+        } };
+        if (invalid) {
+            try std.testing.expectError(error.InvalidForeignKey, emitter.emit(schema, &sql.writer));
+            try std.testing.expectEqual(@as(usize, 0), sql.written().len);
+        } else {
+            try emitter.emit(schema, &sql.writer);
+            try std.testing.expect(std.mem.indexOf(u8, sql.written(), "TEXT NOT NULL PRIMARY KEY REFERENCES") != null);
+            try std.testing.expect(std.mem.indexOf(u8, sql.written(), "WITHOUT ROWID") == null);
+        }
+    }
 }
 
 test "public resolved FK metadata preflight leaves output empty" {
@@ -70,14 +111,24 @@ test "public resolved FK metadata preflight leaves output empty" {
     local.type = .text;
     try reject(local, &.{key}, error.InvalidForeignKey);
     local = valid;
+    local.primary_key = .allow_reuse;
+    try reject(local, &.{key}, error.InvalidIdReuse);
     local.primary_key = .standard;
-    try reject(local, &.{key}, error.UnsupportedForeignKey);
+    local.nullable = true;
+    try reject(local, &.{key}, error.NullablePrimaryKey);
+    local.nullable = false;
+    local.default = .{ .text = "bad" };
+    try reject(local, &.{key}, error.InvalidDefault);
     local = valid;
     local.foreign_key.?.delete_action = .set_null;
     try reject(local, &.{key}, error.InvalidForeignKey);
     for ([_]resolved.DeleteAction{ .cascade, .set_null }) |action| {
         local = valid;
         local.nullable = action == .set_null;
+        if (action == .cascade) {
+            local.primary_key = .standard;
+            local.default = .{ .integer = 7 };
+        }
         local.foreign_key.?.delete_action = action;
         var output = std.Io.Writer.Allocating.init(std.testing.allocator);
         defer output.deinit();
@@ -86,6 +137,7 @@ test "public resolved FK metadata preflight leaves output empty" {
             .{ .dsl_name = "P", .sql_name = "P", .columns = &.{key} },
         } }, &output.writer);
         try std.testing.expect(std.mem.indexOf(u8, output.written(), if (action == .cascade) "ON DELETE CASCADE" else "ON DELETE SET NULL") != null);
+        if (action == .cascade) try std.testing.expect(std.mem.indexOf(u8, output.written(), "INTEGER NOT NULL PRIMARY KEY DEFAULT 7") != null);
     }
     local = valid;
     local.type = .boolean;

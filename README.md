@@ -104,14 +104,19 @@ defaults, docs, checks, and uniqueness belong to the local FK declaration;
 local defaults are validated against the inherited type. Enum FK defaults use
 bare words or backtick text; datetime FK defaults also accept `::now`.
 Keyless/composite targets and type-dependency cycles are diagnosed. `*!field`
-parses but shared-identity resolution waits for Slice5; `#allow reuse` is invalid
+resolves shared identity, including chains to concrete PK types; `#allow reuse` is invalid
 on every FK. Field `#onDelete restrict`, `cascade`, and `setNull` emit quoted
 `REFERENCES table(column) ON DELETE RESTRICT`, `CASCADE`, or `SET NULL`.
 The default is restrict; setNull requires local nullability. Duplicate actions,
 unknown actions, and table/non-FK scope are diagnosed. `#onUpdate` is unsupported.
 Deferrability is unspecified. Forward, self, and mutual ordinary references work.
-No automatic FK indexes are created. Shared-PK FKs remain unsupported until Slice5;
-nonnullable set-null metadata fails emitter preflight before any output.
+Shared-PK FKs are nonnullable and never generate IDs. Single integer PK+FK tables
+emit `STRICT, WITHOUT ROWID`; composite and noninteger keys use ordinary STRICT
+tables with every PK part NOT NULL. Type-compatible defaults are allowed but must
+reference existing parents at runtime; omission without a default and explicit NULL
+fail. Ordinary integer PKs retain AUTOINCREMENT and NULL ID generation.
+No automatic FK indexes are created (next slice). Nonnullable set-null metadata
+fails emitter preflight before any output.
 Public resolved schemas must supply consistent FK metadata: SQL names match
 ASCII-case-insensitively, the target has exactly one real PK, and logical types
 and enum value sets match exactly (enum order does not matter). Invalid metadata

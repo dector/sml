@@ -214,8 +214,6 @@ const Context = struct {
                         if (directive.kind == .of)
                             return self.fail(.invalid_directive_scope, directive.span, "Foreign-key enum values are inherited; #of is not allowed");
                     }
-                    if (field.primary_key)
-                        return self.fail(.unsupported_feature, field.span, "Primary-key foreign keys (shared identity) are not supported until StoredFK Slice5");
                 }
                 for (table.fields[0..j]) |previous| {
                     if (std.mem.eql(u8, previous.name.text, field.name.text))
@@ -266,7 +264,7 @@ const Context = struct {
                 var value: ?resolved.Default = null;
                 if (field.default) |default| {
                     const token = defaultToken(default);
-                    if (field.primary_key and storage == .integer and key_count == 1)
+                    if (field.primary_key and !field.foreign_key and storage == .integer and key_count == 1)
                         return self.fail(.default_on_auto_primary_key, token.span, "auto-generated integer primary keys cannot have defaults");
                     // A backtick FK default is enum text only after target lookup.
                     const typed_default: parsed.Default = if (field.foreign_key and storage == .enumeration and default == .raw_sql)
