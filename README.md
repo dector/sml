@@ -254,9 +254,21 @@ the synthesized DSL name.
 
 Unnamed `~~` keys and endpoint metadata use canonical endpoint order; authored
 keys without `~~` retain exact written order. Without `~~`, all endpoint keys
-must be written: there is no implicit generation. Unnamed roles, self-pairs and
-more than two endpoints are unsupported. Shorthand `@.field` and implicit
-connection generation remain pending.
+must be written: an explicit declaration never gets automatic key prefill.
+
+Shorthand `~books Book[] @.authorId` selects the unnamed connection by the
+owner/target canonical DSL identity. An explicit unnamed declaration wins even
+when declared later, including its authored keys and options; otherwise one
+connection with generated keys is appended per pair. Opposite-side relationships
+share it. Generated tables append in globally sorted canonical identity order,
+independent of relationship order. An optional `<<bookId` hint is validated,
+though the destination is normally inferred. Both endpoints must be existing
+normal tables with one PK. Generated keys are nonnullable and composite-unique,
+so singular mappings need an explicit connection with a unique source key.
+Named connections with the same pair are not reused. Missing authored source
+fields are errors, never guessed or generated. Relationships/docs emit no SQL
+or queries. Unnamed roles, self-pairs, more than two endpoints and nested
+connections remain unsupported; use named connections for self/role mappings.
 
 Complete explicit-key example (forward mappings are allowed):
 

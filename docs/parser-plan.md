@@ -186,8 +186,8 @@ documentation detachment, forbidden options, and FK index coverage remain tested
 See `src/relationship_resolution_test.zig` for further ownership/OOM and mapping
 coverage. SQL documentation placement is still open, not part of this settled
 metadata-only implementation stage.
-Other generators, date/JSON, expression indexes, and
-unnamed connections come in later slices. Reusable types are deferred indefinitely.
+Other generators, date/JSON and expression indexes come in later slices.
+Explicit and implicit unnamed connections support distinct unroled pairs now. Reusable types are deferred indefinitely.
 Numeric exponent notation and multiline literals are deferred.
 
 ## Settled syntax
@@ -430,8 +430,19 @@ Extend syntax models, parser, resolver, emitter, and tests together:
    Overrides retain stored-FK/PK/nonnullable/exact-endpoint roles and reject reuse;
    ordinary docs, names, actions, valid defaults, checks, uniques and indexes apply.
    Duplicate explicit names remain errors. Multi/self override pipelines have OOM,
-   ownership and SQLite runtime coverage. Nested endpoints and unnamed generation
-   remain deferred. Generated
+   ownership and SQLite runtime coverage. Explicit unnamed declarations and
+   `@.field` implicit generation support two distinct unroled normal tables.
+   Shorthand uses canonical DSL identity, reuses explicit unnamed declarations
+   even later in source, and never prefills keys without an explicit `~~` there.
+   Otherwise exactly one generated connection per pair appends after authored
+   tables, globally sorted by canonical identity. Opposite-side mappings share
+   it; named connections remain distinct. Private arena-owned expansion copies
+   bind relationship sources before key generation without mutating parsed input.
+   Optional destination hints validate normally. Missing/unknown/composite PK
+   endpoints and self/nested mappings are diagnosed; singular mappings still
+   need a unique source. Fixtures cover SQL neutrality, ownership, OOM, tuple
+   uniqueness, required keys, restrictive FKs and reverse indexes. Unnamed self,
+   roles and more than two endpoints remain unsupported. Generated
    DSL key names concatenate `camelCase(table-or-role DSL name)` and
    `PascalCase(PK DSL field name)` (`Author.id` → `authorId`; role `writer` with
    `accountKey` → `writerAccountKey`); existing SQL normalization still applies.
@@ -442,7 +453,8 @@ Extend syntax models, parser, resolver, emitter, and tests together:
    explicit keys keep authored order, and overrides do not move generated slots.
    Named casing removes underscores, uppercases the following byte, and changes
    only the initial byte otherwise (`URL` → `uRL`), preserving humps. Unnamed
-   sorting is future design, not current feature support.
+   sorting is implemented for distinct unroled unnamed pairs; unnamed role/tie
+   rules remain future design.
 5. Remaining directives and multiline literals after their rules are finalized.
 
 Do not build a full-v1 parser ahead of models and semantic support.

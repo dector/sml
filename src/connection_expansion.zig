@@ -21,11 +21,12 @@ fn part(ctx: anytype, out: *std.ArrayList(u8), text: []const u8, pascal: bool, s
 }
 
 pub fn expand(ctx: anytype, source: parsed.Schema) @TypeOf(ctx.*).Error!parsed.Schema {
-    const needed = for (source.tables) |table| {
-        if (table.connection) |connection| if (connection.unnamed or connection.generated_keys_span != null) break true;
+    const needed = needed: for (source.tables) |table| {
+        if (table.connection) |connection| if (connection.unnamed or connection.generated_keys_span != null) break :needed true;
+        for (table.relationships) |relationship| if (relationship.source_implicit) break :needed true;
     } else false;
     if (!needed) return source;
-    const tables = try ctx.allocator.dupe(parsed.Table, source.tables);
+    var tables = try ctx.allocator.dupe(parsed.Table, source.tables);
     // Canonicalize a private copy, without mutating source headers or fields.
     for (tables, 0..) |*table, ti| {
         const connection = table.connection orelse continue;
@@ -46,6 +47,7 @@ pub fn expand(ctx: anytype, source: parsed.Schema) @TypeOf(ctx.*).Error!parsed.S
         table.name.text = try identity.declarationName(ctx.allocator);
         table.name.span = connection.span;
     }
+    tables = try @import("implicit_connections.zig").expand(ctx, tables);
     // Keep ordinary duplicate diagnostics independent of generated overrides.
     for (tables, 0..) |table, ti| {
         for (tables[0..ti]) |prior| if (std.mem.eql(u8, prior.name.text, table.name.text))

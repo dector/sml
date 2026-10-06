@@ -252,9 +252,12 @@ const Parser = struct {
         }
         const target_span: parsed.Span = .{ .start = target_name.span.start, .end = end };
         try self.relationshipOptions();
-        _ = try self.take(.at, "Relationships require a direct @Table.field source mapping");
-        if (self.current.kind == .dot) return self.fail(self.current.span, "Connection shorthand @.field is unsupported");
-        const source_table = try self.name();
+        const at = try self.take(.at, "Relationships require an @Table.field or @.field source mapping");
+        const implicit = self.current.kind == .dot;
+        const source_table: parsed.Token = if (implicit)
+            .{ .text = "", .span = .{ .start = at.span.start, .end = self.current.span.end } }
+        else
+            token(try self.name());
         _ = try self.take(.dot, "Expected '.' in relationship source mapping @Table.field");
         const source_field = try self.name();
         var destination_field: ?parsed.Token = null;
@@ -273,7 +276,8 @@ const Parser = struct {
             .name = token(relationship_name),
             .target = .{ .name = token(target_name), .nullable = nullable, .span = target_span },
             .collection = collection,
-            .source_table = token(source_table),
+            .source_table = source_table,
+            .source_implicit = implicit,
             .source_field = token(source_field),
             .destination_field = destination_field,
             .documentation = docs,

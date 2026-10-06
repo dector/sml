@@ -968,7 +968,8 @@ non-FK scope are diagnosed. setNull requires local nullability, also enforced by
 emitter preflight before writing output. `#onUpdate` is unsupported. Automatic
 FK indexes are implemented in StoredFK Slice6, including named explicit-key
 connection tables. Direct backrefs and named connection mappings are implemented;
-unnamed/generated connections remain future design.
+distinct unroled unnamed connections and generated keys are implemented; nested
+endpoints and unnamed self/role/multi-endpoint connections remain future design.
 
 ```text
 Book {
@@ -1134,6 +1135,19 @@ no SQL column to name, index, or constrain.
 
 ### Implicit unnamed connections
 
+**Implemented scope:** `@.field` supports exactly two distinct, unroled existing
+normal tables with one declared PK each. Lookup uses canonical exact DSL identity,
+not SQL aliases or synthesized names. Explicit unnamed declarations win even
+when later in source; their keys/options are reused unchanged, with no automatic
+prefill. Missing authored source fields are errors. Otherwise one generated table
+per pair appends after authored tables in globally sorted canonical identity order.
+Expansion uses private resolver-arena arrays, leaving parsed input untouched.
+Optional destination hints validate normally. Generated source keys are not unique
+alone, so nullable singular mappings need an explicit unique source key.
+Named connections on the same pair remain separate. Unknown/composite endpoints,
+unnamed self/roles/multi-endpoints and nested endpoints are unsupported. Virtual
+relationships and their docs emit no SQL or queries.
+
 ```text
 Author {
   !id int
@@ -1174,11 +1188,10 @@ SQL names then use the existing normalization rules as usual (`author_id`,
 `writer_account_key`), unless overridden with `#name`. SQL aliases never supply
 these components.
 
-This settles the component formula, not a new acronym/underscore conversion
-policy. The existing implementation only converts DSL names to SQL snake_case;
-it has no camelCase/PascalCase component helper. Keep component edge cases
-consistent when implementing this future feature; do not infer a new casing
-algorithm from these examples.
+The implemented component helper removes underscores and uppercases the next
+byte, changing only the initial byte otherwise (`URL` → `uRL`). Generated named
+keys follow header order; distinct unroled unnamed keys follow canonical DSL
+endpoint order. SQL normalization remains separate.
 
 ### Explicit unnamed declaration
 
@@ -1233,8 +1246,9 @@ metadata only, not composite PK order. Endpoint keys have no automatic prefill
 or ID generation. Payload defaults/checks/uniqueness
 and FK deletion actions work exactly as in ordinary tables. The first PK column
 covers its FK lookup; other uncovered FKs receive ordinary indexes.
-Nested endpoints remain deferred. Unnamed connections and generated-key sections
-below describe future design, not current support.
+Nested endpoints remain deferred. Named generated keys and same-DSL-name overrides
+are implemented, as are explicit/implicit unnamed distinct unroled pairs. Unnamed
+self/role/multi-endpoint examples below remain future design.
 
 ```text
 Author {
@@ -1315,12 +1329,13 @@ The generated composite PK follows that generated field order. Fully explicit
 keys instead retain authored field order, as currently implemented: their first
 written PK field remains first regardless of header or canonical endpoint order.
 An explicit override of a generated field keeps its generated slot; it does not
-switch that field to authored-key ordering. These rules are design decisions,
-not a claim that unnamed connections or generated keys are implemented.
+switch that field to authored-key ordering. These rules are implemented for
+named connections and distinct unroled unnamed pairs. Unnamed role/tie ordering
+remains future design.
 
-### Role names (future generated-key design)
+### Role names (implemented for named connections)
 
-In the future generated-key design, roles customize generated DSL key names:
+Roles customize generated DSL key names in named connections:
 
 ```text
 ~Authorship(writer Author, publication Book) {

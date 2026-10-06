@@ -86,6 +86,8 @@ pub const Relationship = struct {
     target: TypeRef,
     collection: bool = false,
     source_table: Token,
+    /// @.field: empty source_table text, with the @. span until expansion.
+    source_implicit: bool = false,
     source_field: Token,
     destination_field: ?Token = null,
     documentation: ?Documentation = null,

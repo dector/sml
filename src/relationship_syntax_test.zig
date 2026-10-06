@@ -79,8 +79,7 @@ test "direct relationships preserve names cardinality full spans docs and separa
 
 test "relationship mapping and options have explicit diagnostics" {
     const cases = [_][2][]const u8{
-        .{ "T {\n  ~books Book[]\n}\n", "require a direct @Table.field" },
-        .{ "T {\n  ~books Book[] @.owner\n}\n", "Connection shorthand" },
+        .{ "T {\n  ~books Book[]\n}\n", "require an @Table.field" },
         .{ "~(left A, B) {}", "Unnamed connections support" },
         .{ "T {\n  ~books Book[]? @Book.owner\n}", "cannot be nullable" },
         .{ "T {\n  books Book[]\n}", "Stored arrays" },
@@ -107,7 +106,7 @@ test "relationship mapping and options have explicit diagnostics" {
 
 test "relationship names all use declaration identifier grammar" {
     for ([_][]const u8{ "_", "true", "false", "null", "1", "'x'", "`x`" }) |bad| {
-        inline for ([_][]const u8{ "T {{\n  ~{s} Book[] @Book.owner\n}}", "T {{\n  ~books {s}[] @Book.owner\n}}", "T {{\n  ~books Book[] @{s}.owner\n}}", "T {{\n  ~books Book[] @Book.{s}\n}}" }) |format| {
+        inline for ([_][]const u8{ "T {{\n  ~{s} Book[] @Book.owner\n}}", "T {{\n  ~books {s}[] @Book.owner\n}}", "T {{\n  ~books Book[] @{s}.owner\n}}", "T {{\n  ~books Book[] @Book.{s}\n}}", "T {{\n  ~books Book[] @.{s}\n}}" }) |format| {
             const source = try std.fmt.allocPrint(std.testing.allocator, format, .{bad});
             defer std.testing.allocator.free(source);
             _ = try diagnostic(source);
@@ -117,7 +116,7 @@ test "relationship names all use declaration identifier grammar" {
 }
 
 test "every incomplete relationship prefix reports EOF without partial schemas" {
-    const prefixes = [_][]const u8{ "~", "~books", "~books Book", "~books Book[", "~books Book[]", "~books Book?", "~books Book[] @", "~books Book[] @Book", "~books Book[] @Book.", "~books Book[] @Book.owner" };
+    const prefixes = [_][]const u8{ "~", "~books", "~books Book", "~books Book[", "~books Book[]", "~books Book?", "~books Book[] @", "~books Book[] @Book", "~books Book[] @Book.", "~books Book[] @Book.owner", "~books Book[] @.", "~books Book[] @.owner <<" };
     for (prefixes) |prefix| {
         const source = try std.fmt.allocPrint(std.testing.allocator, "T {{\n  {s}", .{prefix});
         defer std.testing.allocator.free(source);
