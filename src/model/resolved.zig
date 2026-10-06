@@ -25,6 +25,7 @@ pub const Table = struct {
     sql_name: []const u8,
     columns: []const Column = &.{},
     unique_constraints: []const UniqueConstraint = &.{},
+    composite_foreign_keys: []const CompositeForeignKey = &.{},
     indexes: []const Index = &.{},
     /// Explicit table checks in directive source order.
     checks: []const Check = &.{},
@@ -46,6 +47,8 @@ pub const Endpoint = struct {
     /// explicit roles remain null (names/order do not imply bindings).
     /// Public schemas may supply valid distinct explicit bindings.
     column_index: ?usize = null,
+    /// Ordered local components for an endpoint with a composite parent key.
+    column_indices: []const usize = &.{},
 };
 
 /// Logical column types. Boolean uses INTEGER; date, datetime and enumeration use TEXT.
@@ -103,11 +106,19 @@ pub const UniqueConstraint = struct {
 /// FK deletion policy. No update actions are modeled.
 pub const DeleteAction = enum { restrict, cascade, set_null };
 
-/// Resolved single-column FK metadata; SQL names are owned with the schema.
+/// Resolved FK metadata; SQL names are owned with the schema.
 /// The local Column carries the inherited logical type and enum allowed values.
-/// Public schemas must match the target's single PK by ASCII-case-insensitive
-/// SQL name, logical type, and exact enum value set. Emission preflights this.
+/// Scalar FKs match the target's single PK; composite components belong to a
+/// table-level group covering the target's entire PK in written order.
+/// Emission preflights SQL names, logical types, and exact enum value sets.
+pub const CompositeForeignKey = struct {
+    /// Local components in the target's written primary-key order.
+    columns: []const usize,
+};
+
 pub const ForeignKey = struct {
+    /// Component metadata is emitted only through a validated table-level group.
+    composite: bool = false,
     target_table_sql_name: []const u8,
     target_column_sql_name: []const u8,
     delete_action: DeleteAction = .restrict,

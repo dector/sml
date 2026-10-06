@@ -97,7 +97,7 @@ test "generated endpoint and override diagnostics retain real spans" {
         .{ .body = "~C(A, B) {\n~~\n}\n", .parents = "A {\n!x int\n!y int\n}\nB {\n!id int\n}\n", .fragment = "A", .message = "exactly one" },
         .{ .body = "~C(A, B) {\n~~\n}\n", .parents = "A {\n!__ int\n}\nB {\n!id int\n}\n", .fragment = "A", .message = "unrepresentable" },
         .{ .body = "~C(__ A, B) {\n~~\n}\n", .fragment = "__ A", .message = "unrepresentable" },
-        .{ .body = "~C(Inner, B) {\n~~\n}\n", .parents = "A {\n!id int\n}\nB {\n!id int\n}\n~Inner(A, B) {\n~~\n}\n", .category = .unsupported_feature, .fragment = "Inner", .message = "Nested" },
+        .{ .body = "~C(C, B) {\n~~\n}\n", .category = .invalid_connection, .fragment = "C", .message = "cycle" },
     };
     for (cases) |case| {
         const text = try std.mem.concat(std.testing.allocator, u8, &.{ case.body, case.parents });

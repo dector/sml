@@ -27,7 +27,8 @@ design does not imply implemented syntax.
 - Inline enums are implemented. Reusable types (including named enums) are
   deferred indefinitely; their examples below are design sketches, not supported syntax.
 - Named role/self/multi-endpoint connections support explicit and generated keys.
-  Unnamed roles/self/multi-endpoint connections are implemented; nested endpoints remain deferred.
+  Unnamed roles/self/multi-endpoint connections and explicit nested endpoints are implemented.
+  Composite-endpoint virtual relationship mappings remain unsupported.
 - Current types: `int`, `real`, `str`, `blob`, `bool`, `date`, `datetime`, inline `enum`.
   Expressions, field/table checks, named native UNIQUE and CHECK constraints,
   ordinary/unique/partial indexes, and FK/backref resolution are implemented.
@@ -655,9 +656,10 @@ Keyless tables are allowed. Ordinary SQLite tables have a hidden `rowid`, but it
 is not a declared schema key and is not an FK target. `VACUUM` can change a hidden
 rowid that is not aliased by an `INTEGER PRIMARY KEY` column.
 
-For v1, FK targets must have a declared single-column primary key. Composite FK
-targets and references to alternative unique keys are outside the settled v1
-reference syntax.
+Ordinary scalar FK targets must have a declared single-column primary key.
+Explicit nested connection endpoints are the exception: they reference the whole
+connection PK (section 14). General composite FK declarations and references to
+alternative unique keys remain outside the settled v1 reference syntax.
 
 ### Shared identity: PK+FK
 
@@ -975,8 +977,9 @@ also need a deterministic naming convention.
 
 **Implementation status (StoredFK Slice4): resolution, SQL emission, and deletion actions.** `*field Table?`
 resolves exact DSL table names across forward/self references. A target must
-have exactly one declared PK field; hidden rowids, keyless tables, and composite
-keys are not targets. Logical types and enum allowed sets are inherited, but
+have exactly one declared PK field for an ordinary scalar FK; hidden rowids,
+keyless tables, and normal-table composite keys are not targets. Nested connection
+endpoint tuples and their component overrides are described in section 14. Logical types and enum allowed sets are inherited, but
 nullability, defaults, documentation, checks, and uniqueness are not. Local
 FK defaults are validated against the inherited type. Final local types are
 available to checks, uniqueness, and indexes. Resolved FK metadata owns the
@@ -993,8 +996,8 @@ non-FK scope are diagnosed. setNull requires local nullability, also enforced by
 emitter preflight before writing output. `#onUpdate` is unsupported. Automatic
 FK indexes are implemented in StoredFK Slice6, including named explicit-key
 connection tables. Direct backrefs and named connection mappings are implemented;
-extended unnamed connections and generated keys are implemented; nested
-endpoints remain deferred.
+extended unnamed connections, generated keys and explicit nested endpoints are
+implemented. Composite-endpoint virtual relationship mappings remain unsupported.
 
 ```text
 Book {
@@ -1082,8 +1085,10 @@ Category {
 Self-FKs are supported. They enforce existence, not acyclicity. Preventing cycles
 is not an implicit language feature.
 
-Composite foreign keys are deferred beyond v1. Multiple independent FKs are not
-a substitute for a composite FK when a tuple must reference one parent row.
+General composite foreign-key declarations are deferred beyond v1. Nested
+connection endpoints already emit composite FKs to the whole target PK (section
+14). Multiple independent FKs are not a substitute when a tuple must reference
+one parent row.
 
 ## 13. Relationships and backrefs
 
@@ -1175,7 +1180,7 @@ Expansion uses private resolver-arena arrays, leaving parsed input untouched.
 Optional destination hints validate normally. Generated source keys are not unique
 alone, so nullable singular mappings need an explicit unique source key.
 Named connections on the same pair remain separate. Unknown/composite endpoints
-and nested endpoints are unsupported. Virtual
+and connection endpoints are unsupported by this implicit shorthand. Virtual
 relationships and their docs emit no SQL or queries.
 
 ```text
@@ -1253,8 +1258,9 @@ explicit key declarations.
 ### Named connections
 
 **Implemented (NamedConnections Slice2):** named headers with explicit `*!`
-keys only. Endpoints are existing normal tables with exactly one PK (including
-inherited FK PK types). Keys form a nonnullable composite PK whose FK target
+keys. Normal endpoints have exactly one PK (including inherited FK PK types);
+connection endpoints expand their complete PK as described below.
+Keys form a nonnullable composite PK whose FK target
 multiset exactly covers the header. No `#allow reuse` or implicit keys. Ordinary
 payload fields and non-PK FKs are allowed; SQL PK order is written field order.
 Endpoint roles are exact DSL-unique names. Repeated tables require distinct
@@ -1279,7 +1285,7 @@ covers its FK lookup; other uncovered FKs receive ordinary indexes.
 Named generated keys and same-DSL-name overrides are implemented, as are explicit
 unnamed role/self/multi-endpoint connections and exact-pair shorthand.
 
-#### Unsupported: connection tables as endpoints
+#### Connection tables as endpoints
 
 A **nested connection** uses another connection table as an endpoint:
 
@@ -1293,18 +1299,29 @@ A **nested connection** uses another connection table as an endpoint:
 }
 ```
 
-`Credit` would connect an author–book pairing to an organization, not just an
-author or a book. Connection tables usually have composite keys; referencing the
-whole pairing needs composite-FK rules we have not designed. Nested connection
-endpoints are therefore unsupported, even if a connection declares a single key.
-This applies to named and unnamed connections, explicit keys and `~~`, regardless
-of declaration order. Resolution reports `unsupported_feature` at the connection
-endpoint name before FK type resolution. Public resolved schemas also reject
-connection endpoints with `InvalidConnection` before any SQL output.
+`Credit` connects an author–book pairing to an organization, not just an
+author or a book. Named and unnamed explicit connection headers support this,
+including forward references. Each nested endpoint expands the complete target
+PK in the target's written order. `Authorship` generates `authorId`, `bookId`;
+`Credit` generates `authorshipAuthorId`, `authorshipBookId`, `organizationId`.
+SQL emits a table-level composite FK to `Authorship(authorId, bookId)`, not
+independent FKs to Author and Book. All inherited components are nonnullable
+PK fields with no automatic ID generation.
 
-This does **not** mean relationship fields inside relationships or nested braces.
-The restriction is about the table referenced by a connection header endpoint;
-existing relationship and brace rules are unchanged.
+For `~~`, local names concatenate the endpoint role (or endpoint table name)
+with each PascalCase target key DSL name, using the existing underscore-removal
+camel convention. Explicit `*!pair Authorship` expands to `pairAuthorId`,
+`pairBookId` in target PK order. Tuple declarations allow only `#onDelete`;
+scalar defaults, names, checks and other scalar options are rejected. To attach
+these options, override individual `~~` slots with matching DSL names and the
+same Authorship target. Every component of a composite FK must agree on its
+`#onDelete` action; PK components cannot use setNull.
+
+Dependency cycles report `invalid_connection`; nesting is capped at 256 levels.
+Normal endpoints still require exactly one PK. Composite-endpoint mappings are
+not supported by the existing virtual relationship API, and implicit `@.`
+shorthand still requires normal endpoints. Ordinary scalar relationship mappings
+and nested brace syntax are unchanged.
 
 ```text
 Author {
@@ -2324,8 +2341,8 @@ These are not new agreed requirements; they are gaps worth resolving explicitly.
 11. Whether aliases of `int` receive exactly the same automatic-PK behavior.
 12. Future reusable-type defaults on keys. Current PK+FK fields permit
     inherited-type-compatible defaults and never generate IDs (section 9).
-13. Nested connection endpoints remain deferred. Named and unnamed role/self/
-    multi-endpoint headers and non-`id` generated keys are implemented (section 14).
+13. Composite-endpoint virtual relationship mappings remain deferred. Explicit
+    nested connection headers and non-`id` generated keys are implemented (section 14).
 14. How to name a primary-key constraint without introducing a conflicting scope.
 15. Future trigger ordering, CLI output, and live SQLite validation. Current
     schema preflight precedes output; tables precede indexes; writer failures
@@ -2336,7 +2353,8 @@ These are not new agreed requirements; they are gaps worth resolving explicitly.
 - Migrations, including renames and SQLite table rebuilds.
 - Multi-file schemas, imports, and namespaces.
 - Older SQLite compatibility modes.
-- Composite foreign keys and their explicit local/target mapping syntax.
+- General composite foreign keys and arbitrary local/target mapping syntax;
+  nested connection endpoints already emit ordered composite foreign keys.
 - Structured JSON literal parsing and its duplicate-key checks.
 - Stored scalar arrays such as `str[]`.
 - Query generation, eager loading, ORM/runtime helpers, or collection behavior.
@@ -2345,4 +2363,5 @@ These are not new agreed requirements; they are gaps worth resolving explicitly.
 - Automatic enforcement that every target has a reverse one-to-one row.
 
 Named and unnamed role/self/multi-endpoint connections are implemented,
-including generated keys and overrides. Nested endpoints remain deferred.
+including generated keys, overrides and explicit nested endpoints.
+Composite-endpoint virtual relationship mappings remain unsupported.

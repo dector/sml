@@ -95,5 +95,8 @@ test "stdout writer failure propagates without source diagnostics" {
 }
 
 test "pipeline allocation failures clean up without output" {
-    try std.testing.checkAllAllocationFailures(std.testing.allocator, allocationExercise, .{});
+    // Arena growth can resize in place depending on the backing allocator's
+    // address layout. Force relocation so every failing allocation run agrees.
+    var backing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .resize_fail_index = 0 });
+    try std.testing.checkAllAllocationFailures(backing.allocator(), allocationExercise, .{});
 }

@@ -1,12 +1,26 @@
 # Parser plan
 
-Connection tables cannot be connection endpoints. Resolution rejects named and
-unnamed nested connections before key generation or FK type resolution, so both
-explicit keys and `~~` report `unsupported_feature` at the endpoint name,
-including forward references. Public resolved-schema validation rejects them
-before SQL output. This is a connection-as-endpoint restriction, not a ban on
-relationship mappings or nested braces. Composite-FK semantics remain undesigned.
-Coverage: `src/nested_connection_test.zig`.
+Named and unnamed explicit connection headers support connection tables as
+endpoints, including forward references. Resolution expands dependencies before
+key/type resolution. `~~` expands the full target PK in its written order;
+local DSL names use the endpoint role (otherwise table name) plus each PascalCase
+target key name, with the existing underscore-removal camel convention.
+For example Authorship's `authorId`, `bookId` become Credit's
+`authorshipAuthorId`, `authorshipBookId`, followed by `organizationId`.
+The nested keys emit one table-level composite FK to Authorship(authorId, bookId),
+not separate leaf-table FKs. Explicit `*!pair Authorship` expands to
+`pairAuthorId`, `pairBookId`. Tuple declarations allow only `#onDelete` and reject
+scalar defaults, names, checks and other scalar options. Individual `~~` slots
+may override those options while retaining the same Authorship target; composite
+FK components must agree on deletion policy. Inherited keys are nonnullable and
+never auto-generated. Cycles report `invalid_connection`; nesting is capped at
+256 levels. Normal endpoints still require exactly one PK.
+Composite-endpoint virtual relationship mappings are unsupported. Implicit `@.`
+shorthand still requires normal endpoints; ordinary scalar relationship mappings
+and nested braces are unchanged.
+Coverage: `src/nested_connection_test.zig`,
+`src/testdata/parser/nested_connections.sml` and
+`src/testdata/nested_connections_runtime_test.py`.
 
 Slice1 named CHECK constraints are implemented. Field/table `#check expr`,
 `? expr` and `?? expr` accept optional same-line braces using the native UNIQUE
@@ -27,7 +41,7 @@ Status: the first supported parser milestone (stages 1–4) is implemented and
 covered by tokenizer, parser, allocation-failure, and source-to-SQL tests.
 Stage 5 is partially implemented, including partial indexes, stored FKs,
 virtual relationships, generated keys/overrides, extended explicit unnamed
-connections, exact-pair shorthand, and logical `date`. Stages below retain their
+connections, explicit nested endpoints, exact-pair shorthand, and logical `date`. Stages below retain their
 historical milestone scope; they are not a complete list of current support.
 `? unique` / `#check unique` preserve a native_unique payload with empty field
 references and ordered, spanned options. Same-line brace options support exact
@@ -515,7 +529,11 @@ Extend syntax models, parser, resolver, emitter, and tests together:
    only the initial byte otherwise (`URL` → `uRL`), preserving humps. Unnamed
    table/role sorting is implemented, including repeated tables. Role differences
    do not distinguish unnamed identities; duplicate identities are rejected.
-   Nested connection endpoints remain deferred.
+   Explicit nested connection endpoints are implemented, including ordered
+   composite FKs, generated component overrides and explicit tuple expansion.
+   Dependency cycles and depth beyond 256 report invalid_connection.
+   Composite-endpoint relationship mappings remain unsupported; implicit shorthand
+   remains normal-endpoint-only.
 5. Remaining directives and multiline literals after their rules are finalized.
 
 Do not build a full-v1 parser ahead of models and semantic support.

@@ -168,8 +168,12 @@ const Context = struct {
             var key: ?usize = null;
             for (input.tables[target].fields, 0..) |candidate, i| {
                 if (!candidate.primary_key) continue;
-                if (key != null) return self.fail(.invalid_foreign_key_target, field.type.name.span, "Foreign-key target must have exactly one declared primary-key field (composite key is unsupported)");
-                key = i;
+                if (field.foreign_key_component) |component| {
+                    if (std.mem.eql(u8, component.text, candidate.name.text)) key = i;
+                } else {
+                    if (key != null) return self.fail(.invalid_foreign_key_target, field.type.name.span, "Foreign-key target must have exactly one declared primary-key field (composite key is unsupported)");
+                    key = i;
+                }
             }
             const ki = key orelse return self.fail(.invalid_foreign_key_target, field.type.name.span, "Foreign-key target must have exactly one declared primary-key field (no primary key declared)");
             const pk = input.tables[target].fields[ki];
@@ -323,6 +327,7 @@ const Context = struct {
                     .default = value,
                     .foreign_key = if (graph[i][j].target_table) |target| .{
                         .delete_action = delete_action,
+                        .composite = field.foreign_key_group != null,
                         .target_table_sql_name = try self.name(input.tables[target].name, (try self.options(input.tables[target].directives, true)).name),
                         .target_column_sql_name = try self.name(input.tables[target].fields[graph[i][j].target_column.?].name, (try self.options(input.tables[target].fields[graph[i][j].target_column.?].directives, false)).name),
                     } else null,
@@ -331,6 +336,20 @@ const Context = struct {
                 };
             }
             tables[i] = .{ .dsl_name = try self.allocator.dupe(u8, table.name.text), .sql_name = sql_name, .columns = columns, .documentation = try self.documentation(table.documentation) };
+            var composite_fks: std.ArrayList(resolved.CompositeForeignKey) = .empty;
+            for (table.fields, 0..) |field, fi| {
+                const group = field.foreign_key_group orelse continue;
+                const seen = for (table.fields[0..fi]) |prior| {
+                    if (prior.foreign_key_group) |other| if (std.mem.eql(u8, group, other)) break true;
+                } else false;
+                if (seen) continue;
+                var indices: std.ArrayList(usize) = .empty;
+                for (table.fields, 0..) |member, ci| {
+                    if (member.foreign_key_group) |other| if (std.mem.eql(u8, group, other)) try indices.append(self.allocator, ci);
+                }
+                try composite_fks.append(self.allocator, .{ .columns = try indices.toOwnedSlice(self.allocator) });
+            }
+            tables[i].composite_foreign_keys = try composite_fks.toOwnedSlice(self.allocator);
             var table_uniques: std.ArrayList(resolved.UniqueConstraint) = .empty;
             for (table.directives) |directive| {
                 if (directive.kind != .native_unique) continue;
@@ -427,10 +446,17 @@ const Context = struct {
         for (tables, 0..) |*table, ti| {
             var indexes: std.ArrayList(resolved.Index) = .empty;
             try indexes.appendSlice(self.allocator, table.indexes);
+            var fk_columns: std.ArrayList([]const usize) = .empty;
             for (table.columns, 0..) |column, ci| {
-                if (column.foreign_key == null or fkCovered(table.*, ci)) continue;
-                const span = input.tables[ti].fields[ci].span;
-                const columns = try self.allocator.dupe(usize, &.{ci});
+                const fk = column.foreign_key orelse continue;
+                if (fk.composite or fkCovered(table.*, ci)) continue;
+                try fk_columns.append(self.allocator, try self.allocator.dupe(usize, &.{ci}));
+            }
+            for (table.composite_foreign_keys) |fk| {
+                if (!fkGroupCovered(table.*, fk.columns)) try fk_columns.append(self.allocator, fk.columns);
+            }
+            for (fk_columns.items) |columns| {
+                const span = input.tables[ti].fields[columns[0]].span;
                 const sql_name = try self.indexName(table.*, columns);
                 if (std.ascii.startsWithIgnoreCase(sql_name, "sqlite_"))
                     return self.fail(.invalid_identifier, span, "Index names beginning sqlite_ are reserved");
@@ -459,17 +485,33 @@ const Context = struct {
                 const target = for (input.tables, 0..) |candidate, index| {
                     if (std.mem.eql(u8, candidate.name.text, endpoint.table.text)) break index;
                 } else return self.fail(.invalid_connection, endpoint.table.span, "Unknown connection endpoint table");
-                if (input.tables[target].connection != null)
-                    return self.fail(.unsupported_feature, endpoint.table.span, "Nested connection endpoints are unsupported");
                 endpoints[ei] = .{ .table_index = target, .role = if (endpoint.role) |role| try self.allocator.dupe(u8, role.text) else null };
                 var count: usize = 0;
                 for (connection.endpoints) |other| {
                     if (std.mem.eql(u8, other.table.text, endpoint.table.text)) count += 1;
                 }
-                if (connection.generated_keys_span != null) endpoints[ei].column_index = ei;
-                if (count == 1) for (tables[ti].columns, 0..) |column, ci| {
-                    if (column.primary_key != .none and @import("connection_validation.zig").matches(column, tables[target])) endpoints[ei].column_index = ci;
-                };
+                var indices: std.ArrayList(usize) = .empty;
+                if (endpoint.key_names.len != 0) {
+                    for (endpoint.key_names) |key_name| {
+                        for (tables[ti].columns, 0..) |column, ci| {
+                            if (std.mem.eql(u8, key_name.text, column.dsl_name)) {
+                                try indices.append(self.allocator, ci);
+                                break;
+                            }
+                        }
+                    }
+                } else if (count == 1) {
+                    // Bind components in the target's written primary-key order.
+                    for (tables[target].columns) |pk| {
+                        if (pk.primary_key == .none) continue;
+                        for (tables[ti].columns, 0..) |column, ci| {
+                            if (column.primary_key == .none or !@import("connection_validation.zig").matches(column, tables[target])) continue;
+                            if (std.ascii.eqlIgnoreCase(column.foreign_key.?.target_column_sql_name, pk.sql_name)) try indices.append(self.allocator, ci);
+                        }
+                    }
+                }
+                endpoints[ei].column_indices = try indices.toOwnedSlice(self.allocator);
+                if (endpoints[ei].column_indices.len == 1) endpoints[ei].column_index = endpoints[ei].column_indices[0];
             }
             tables[ti].connection = .{
                 .unnamed = connection.unnamed,
@@ -480,7 +522,7 @@ const Context = struct {
         for (input.tables, 0..) |table, ti| {
             if (table.connection) |connection| {
                 @import("connection_validation.zig").validate(.{ .tables = tables }, tables[ti]) catch
-                    return self.fail(.invalid_connection, connection.span, "Connection requires nonnullable primary-key foreign keys matching its normal endpoints and unique roles for repeated tables");
+                    return self.fail(.invalid_connection, connection.span, "Connection requires nonnullable primary-key foreign keys matching each endpoint's complete key and unique roles for repeated tables");
             }
         }
         return .{ .tables = tables, .relationships = try self.relationships(input, tables) };
@@ -581,6 +623,24 @@ const Context = struct {
             }
         }
         return output.toOwnedSlice(self.allocator);
+    }
+
+    fn fkGroupCovered(table: resolved.Table, columns: []const usize) bool {
+        var matched: usize = 0;
+        for (table.columns, 0..) |column, ci| {
+            if (column.primary_key == .none) continue;
+            if (matched >= columns.len) break;
+            if (ci != columns[matched]) break;
+            matched += 1;
+        }
+        if (matched == columns.len) return true;
+        for (table.indexes) |index| {
+            if (index.predicate == null and index.columns.len >= columns.len and std.mem.eql(usize, index.columns[0..columns.len], columns)) return true;
+        }
+        for (table.unique_constraints) |unique| {
+            if (unique.columns.len >= columns.len and std.mem.eql(usize, unique.columns[0..columns.len], columns)) return true;
+        }
+        return false;
     }
 
     fn fkCovered(table: resolved.Table, ci: usize) bool {

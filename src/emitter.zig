@@ -14,12 +14,14 @@ pub const Error = expression_emitter.Error || error{ NullablePrimaryKey, Invalid
 /// Relationships are virtual and produce no SQL.
 /// NUL-containing SQL names, invalid primary keys, ID reuse options, and literal
 /// defaults and enum metadata are rejected before writing. Foreign-key metadata
-/// must match a single real primary key and its logical type/enum value set.
+/// must match a real primary key and its logical type/enum value set. Composite
+/// foreign keys cover the entire target connection key in written order.
 /// Single integer shared primary-key FKs use WITHOUT ROWID to require identity.
 /// Raw SQL is trusted
 /// and not syntax-validated, including direct resolved enum raw-SQL defaults.
 /// Writer failures may leave partial output. The caller owns and flushes the writer.
 pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
+    for (schema.tables) |table| try @import("composite_foreign_key.zig").validate(schema, table);
     for (schema.tables) |table| try @import("connection_validation.zig").validate(schema, table);
     try preflightRelationships(schema);
     for (schema.tables, 0..) |table, table_index| {
@@ -70,7 +72,8 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
             if (@import("expression_resolver.zig").validateCheckResult(&check.expression) != null) return error.InvalidCheck;
         }
         for (table.columns, 0..) |column, column_index| {
-            if (column.foreign_key) |fk| try validateForeignKey(schema, column, fk);
+            // Group validation above is the only authorization to skip scalar checks.
+            if (column.foreign_key) |fk| if (!fk.composite) try validateForeignKey(schema, column, fk);
             if (column.unique_constraints.len > 1) return error.InvalidUnique;
             for (column.unique_constraints) |unique| {
                 if (unique.nulls != .distinct or unique.columns.len != 0) return error.InvalidUnique;
@@ -182,7 +185,7 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
                 }
                 try writer.writeAll(" UNIQUE");
             }
-            if (column.foreign_key) |fk| {
+            if (column.foreign_key) |fk| if (!fk.composite) {
                 try writer.writeAll(" REFERENCES ");
                 try writeIdentifier(writer, fk.target_table_sql_name);
                 try writer.writeByte('(');
@@ -192,8 +195,8 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
                     .cascade => ") ON DELETE CASCADE",
                     .set_null => ") ON DELETE SET NULL",
                 });
-            }
-            if (index + 1 < table.columns.len or key_count > 1 or table.checks.len > 0 or table.unique_constraints.len > 0) try writer.writeByte(',');
+            };
+            if (index + 1 < table.columns.len or key_count > 1 or table.checks.len > 0 or table.unique_constraints.len > 0 or table.composite_foreign_keys.len > 0) try writer.writeByte(',');
             try writer.writeByte('\n');
         }
         if (key_count > 1) {
@@ -206,7 +209,7 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
                 first = false;
             }
             try writer.writeByte(')');
-            if (table.checks.len > 0 or table.unique_constraints.len > 0) try writer.writeByte(',');
+            if (table.checks.len > 0 or table.unique_constraints.len > 0 or table.composite_foreign_keys.len > 0) try writer.writeByte(',');
             try writer.writeByte('\n');
         }
         for (table.checks, 0..) |check, index| {
@@ -219,7 +222,7 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
             try writer.writeAll("CHECK (");
             try expression_emitter.emit(check.expression, writer);
             try writer.writeByte(')');
-            if (index + 1 < table.checks.len or table.unique_constraints.len > 0) try writer.writeByte(',');
+            if (index + 1 < table.checks.len or table.unique_constraints.len > 0 or table.composite_foreign_keys.len > 0) try writer.writeByte(',');
             try writer.writeByte('\n');
         }
         for (table.unique_constraints, 0..) |unique, index| {
@@ -235,7 +238,29 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
                 try writeIdentifier(writer, table.columns[column_index].sql_name);
             }
             try writer.writeByte(')');
-            if (index + 1 < table.unique_constraints.len) try writer.writeByte(',');
+            if (index + 1 < table.unique_constraints.len or table.composite_foreign_keys.len > 0) try writer.writeByte(',');
+            try writer.writeByte('\n');
+        }
+        for (table.composite_foreign_keys, 0..) |group, index| {
+            try writer.writeAll("  FOREIGN KEY (");
+            for (group.columns, 0..) |ci, n| {
+                if (n != 0) try writer.writeAll(", ");
+                try writeIdentifier(writer, table.columns[ci].sql_name);
+            }
+            const fk = table.columns[group.columns[0]].foreign_key.?;
+            try writer.writeAll(") REFERENCES ");
+            try writeIdentifier(writer, fk.target_table_sql_name);
+            try writer.writeAll(" (");
+            for (group.columns, 0..) |ci, n| {
+                if (n != 0) try writer.writeAll(", ");
+                try writeIdentifier(writer, table.columns[ci].foreign_key.?.target_column_sql_name);
+            }
+            try writer.writeAll(switch (fk.delete_action) {
+                .restrict => ") ON DELETE RESTRICT",
+                .cascade => ") ON DELETE CASCADE",
+                .set_null => ") ON DELETE SET NULL",
+            });
+            if (index + 1 < table.composite_foreign_keys.len) try writer.writeByte(',');
             try writer.writeByte('\n');
         }
         const without_rowid = for (table.columns) |column| {
@@ -271,6 +296,13 @@ fn preflightRelationships(schema: resolved.Schema) Error!void {
             return error.InvalidRelationship;
         const owner = schema.tables[r.owner_table_index];
         const source = schema.tables[r.source_table_index];
+        if (r.backing_column_index >= source.columns.len) return error.InvalidRelationship;
+        const backing_fk = source.columns[r.backing_column_index].foreign_key orelse return error.InvalidRelationship;
+        if (backing_fk.composite) return error.InvalidRelationship;
+        if (r.destination_column_index) |ci| {
+            if (ci >= source.columns.len) return error.InvalidRelationship;
+            if (source.columns[ci].foreign_key) |fk| if (fk.composite) return error.InvalidRelationship;
+        }
         try @import("relationship_validation.zig").validate(schema, r);
         for (owner.columns) |c| if (std.mem.eql(u8, c.dsl_name, r.dsl_name)) return error.InvalidRelationship;
         for (schema.relationships[0..n]) |prior| {
@@ -282,6 +314,7 @@ fn preflightRelationships(schema: resolved.Schema) Error!void {
 }
 
 fn validateForeignKey(schema: resolved.Schema, column: resolved.Column, fk: resolved.ForeignKey) Error!void {
+    if (fk.composite) return error.InvalidForeignKey;
     if (column.primary_key == .allow_reuse) return error.InvalidIdReuse;
     if (fk.delete_action == .set_null and !column.nullable) return error.InvalidForeignKey;
     for ([_][]const u8{ fk.target_table_sql_name, fk.target_column_sql_name }) |name| {

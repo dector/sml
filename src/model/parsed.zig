@@ -76,6 +76,8 @@ pub const Connection = struct {
 pub const Endpoint = struct {
     table: Token,
     role: ?Token = null,
+    /// Resolver-owned generated component names, never populated by the parser.
+    key_names: []const Token = &.{},
     /// One table identifier or the role/table pair.
     span: Span,
 };
@@ -105,6 +107,9 @@ pub const Field = struct {
     /// Stored `*field Target`: `type` names the target table, not a scalar type.
     /// Independent of primary-key membership; marker order is `*` then `!`.
     foreign_key: bool = false,
+    /// Resolver-owned composite endpoint lowering metadata; absent in source syntax.
+    foreign_key_component: ?Token = null,
+    foreign_key_group: ?[]const u8 = null,
     default: ?Default = null,
     directives: []const Directive = &.{},
     span: Span,

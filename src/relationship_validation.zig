@@ -5,6 +5,7 @@ const connection = @import("connection_validation.zig");
 
 pub fn references(column: resolved.Column, target: resolved.Table) bool {
     const fk = column.foreign_key orelse return false;
+    if (fk.composite) return false;
     var key: ?resolved.Column = null;
     for (target.columns) |c| if (c.primary_key != .none) {
         if (key != null or c.nullable) return false;

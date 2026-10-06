@@ -30,6 +30,7 @@ test {
     _ = @import("connection_syntax_test.zig");
     _ = @import("connection_resolution_test.zig");
     _ = @import("nested_connection_test.zig");
+    _ = @import("nested_connection_depth_test.zig");
     _ = @import("connection_relationship_test.zig");
     _ = @import("connection_integration_test.zig");
     _ = @import("generated_connection_test.zig");

@@ -276,8 +276,9 @@ PK FK targets must exactly match the endpoint multiset; payload fields and
 additional non-PK FKs are allowed. Composite PK SQL preserves written key order.
 Repeated-table endpoints require distinct explicit roles. Resolved header-order
 `connection.endpoints` own exact roles and stable `table_index` values. Unique-table
-endpoints bind `column_index`; explicit repeated-table roles leave it null.
-Generated endpoints bind their header-ordered columns, including self roles.
+scalar endpoints bind `column_index`; composite endpoints bind ordered
+`column_indices`. Explicit repeated-table roles remain unbound.
+Generated endpoints bind their header-ordered components, including self roles.
 For explicit keys, neither names nor declaration order imply role binding. SQL preflights public
 connection metadata and returns `InvalidConnection` before output on violations.
 NamedConnections Slice3 supports endpoint mappings through declared connections:
@@ -302,8 +303,8 @@ header endpoint order is metadata order, **not key order**. Every endpoint key
 must be supplied on insert: there is
 no automatic prefill or ID generation for connection keys. Payload defaults,
 checks, uniqueness, indexes, and FK deletion policies behave like ordinary tables.
-The PK covers reverse FK lookups only for its first key; remaining uncovered FKs
-receive ordinary indexes.
+The PK covers reverse FK lookups for its leading key columns; uncovered FKs
+receive indexes over their scalar key or complete composite key.
 
 A **nested connection** uses another connection table as an endpoint:
 
@@ -318,18 +319,31 @@ A **nested connection** uses another connection table as an endpoint:
 ```
 
 Here, `Credit` connects an author–book pairing to an organization, not just an
-author or a book. This is unsupported: connection tables usually have composite
-keys, and referencing the whole pairing needs composite-FK rules we have not
-designed. Named and unnamed connections reject connection endpoints with either
-explicit keys or `~~`, including forward references. This restriction concerns
-endpoint tables, not relationship fields or nested braces.
+author or a book. Named and unnamed explicit headers support connection endpoints,
+including forward references. `Authorship` generates `authorId`, `bookId`;
+`Credit` generates `authorshipAuthorId`, `authorshipBookId`, `organizationId`.
+The first two columns form one table-level foreign key to
+`Authorship(authorId, bookId)`, not separate references to Author and Book.
+Each endpoint expands the target's complete PK in its written order.
+
+An explicit tuple `*!pair Authorship` expands to `pairAuthorId`, `pairBookId`
+in that same order. Tuple declarations permit only `#onDelete`; scalar defaults,
+`#name`, checks and other scalar options are rejected. With `~~`, individual
+components can instead be overridden with `*!authorshipAuthorId Authorship`
+and a field option body to attach names, checks or defaults. Overrides must still
+target Authorship. All components of a composite FK must agree on
+`#onDelete`. Inherited keys are nonnullable and never auto-generated.
+Cycles report `invalid_connection`; nesting is capped at 256 levels. Normal
+endpoints still require exactly one PK. The virtual relationship API does not
+support mappings involving composite endpoints. Ordinary scalar mappings and
+nested braces are unchanged; implicit `@.` still accepts only normal endpoints.
 
 Named `~~` generation is supported end to end. It expands before field/type
 resolution without changing parsed source fields or documentation. Generated
 nonnullable PK FKs come first in **header order**, before all explicit payload
 fields, regardless of the marker's body position. Unmodified generated keys have
-no defaults or options; insert must supply those keys. Each endpoint requires one
-normal-table declared PK, including FK PK chains.
+no defaults or options; insert must supply those keys. Each normal endpoint requires one
+declared PK, including FK PK chains; connection endpoints expand their full PK.
 
 DSL names are `camelCase(table-or-role DSL name) + PascalCase(PK DSL field name)`:
 `Author.id` → `authorId`, `writer.accountKey` → `writerAccountKey`,
@@ -395,7 +409,8 @@ Named connections with the same pair are not reused. Missing authored source
 fields are errors, never guessed or generated. Relationships/docs emit no SQL
 or queries. Multi-endpoint mappings use the synthesized DSL name explicitly,
 with `<<field` when the destination is ambiguous. Implicit multi-endpoint
-connections are never guessed. Nested connection endpoints remain deferred.
+connections are never guessed. Composite-endpoint relationship mappings are
+unsupported even though explicit connection headers support nested endpoints.
 
 Complete explicit-key example (forward mappings are allowed):
 
