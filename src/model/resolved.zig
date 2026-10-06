@@ -105,4 +105,16 @@ pub const Column = struct {
 };
 
 /// Virtual relationship metadata; never a stored column.
-pub const Relationship = struct {};
+pub const RelationshipCardinality = enum { many, optional_one };
+
+pub const Relationship = struct {
+    dsl_name: []const u8,
+    /// Indices into Schema.tables; the backing column belongs to source_table_index.
+    owner_table_index: usize,
+    target_table_index: usize,
+    source_table_index: usize,
+    backing_column_index: usize,
+    cardinality: RelationshipCardinality,
+    documentation: ?Documentation = null,
+    span: ?@import("parsed.zig").Span = null,
+};

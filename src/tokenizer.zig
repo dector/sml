@@ -13,6 +13,11 @@ pub const Kind = enum {
     generator,
     l_brace,
     r_brace,
+    tilde,
+    at,
+    dot,
+    l_bracket,
+    r_bracket,
     l_paren,
     r_paren,
     bang,
@@ -126,6 +131,11 @@ pub const Tokenizer = struct {
         return switch (c) {
             '{' => self.token(.l_brace, start),
             '}' => self.token(.r_brace, start),
+            '~' => self.token(.tilde, start),
+            '@' => self.token(.at, start),
+            '.' => if (self.pos < self.source.len and std.ascii.isDigit(self.source[self.pos])) self.fail(start, "invalid number syntax; use decimal digits with an optional leading minus") else self.token(.dot, start),
+            '[' => self.token(.l_bracket, start),
+            ']' => self.token(.r_bracket, start),
             '(' => self.token(.l_paren, start),
             ')' => self.token(.r_paren, start),
             '!' => self.token(.bang, start),
@@ -137,7 +147,7 @@ pub const Tokenizer = struct {
             '#' => self.token(.hash, start),
             ',' => self.token(.comma, start),
             '"' => self.fail(start, "double-quoted strings are not supported; use single quotes"),
-            '.', '+' => self.fail(start, "invalid number syntax; use decimal digits with an optional leading minus"),
+            '+' => self.fail(start, "invalid number syntax; use decimal digits with an optional leading minus"),
             '|' => self.fail(start, "pipe bodies are not supported; use '=' or braces"),
             else => self.fail(start, "invalid or unsupported character"),
         };
@@ -329,10 +339,9 @@ test "logical tokens use maximal pairs and preserve spans without legacy pipes" 
 
 test "invalid and unsupported syntax produces diagnostics" {
     const cases = [_][]const u8{
-        ".5",              "1.",              "+1",           "1e3",          "1e-3",           "0x12",              "1_000",    "1.2.3",       "12abc",
-        "\"text\"",        "|",               ";",            "@",            "-",              "\x00",              "\xc3\xa9", "'unfinished", "`unfinished",
-        "#'unfinished'##", "##`unfinished`#", "'line\nnext'", "`line\rnext`", "#'line\nnext'#", "#'''multiline'''#", "\tfield",  "  \tfield",   "\t-- comment",
-        "\t\n",
+        ".5",              "1.",           "+1",           "1e3",            "1e-3",              "0x12",     "1_000",       "1.2.3",        "12abc",
+        "\"text\"",        "|",            ";",            "-",              "\x00",              "\xc3\xa9", "'unfinished", "`unfinished",  "#'unfinished'##",
+        "##`unfinished`#", "'line\nnext'", "`line\rnext`", "#'line\nnext'#", "#'''multiline'''#", "\tfield",  "  \tfield",   "\t-- comment", "\t\n",
     };
     for (cases) |source| {
         var s = Tokenizer.init(source);

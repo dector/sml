@@ -175,6 +175,10 @@ const Context = struct {
     }
 
     fn schema(self: *Context, input: parsed.Schema) Error!resolved.Schema {
+        for (input.tables) |table| {
+            if (table.relationships.len > 0)
+                return self.fail(.unsupported_feature, table.relationships[0].span, "Virtual relationship resolution is unsupported");
+        }
         const graph = try self.allocator.alloc([]TypeNode, input.tables.len);
         // Validate DSL table identity before resolving references.
         for (input.tables, 0..) |table, i| {

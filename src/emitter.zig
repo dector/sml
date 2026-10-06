@@ -498,7 +498,7 @@ test "virtual relationships produce no SQL" {
     var output = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer output.deinit();
 
-    try emit(.{ .relationships = &.{.{}} }, &output.writer);
+    try emit(.{ .relationships = &.{.{ .dsl_name = "books", .owner_table_index = 0, .target_table_index = 1, .source_table_index = 1, .backing_column_index = 0, .cardinality = .many }} }, &output.writer);
     try std.testing.expectEqualStrings(@embedFile("testdata/emitter/empty_schema.expect.sql"), output.written());
 }
 

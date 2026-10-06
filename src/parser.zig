@@ -129,9 +129,12 @@ const Parser = struct {
     }
 
     fn table(self: *Parser, docs: ?parsed.Documentation) Error!parsed.Table {
+        if (self.current.kind == .tilde) return self.fail(self.current.span, "Connection table declarations are unsupported");
         const first = try self.name();
         _ = try self.take(.l_brace, "Expected '{' on table declaration line; non-table declarations are unsupported");
         var fields: std.ArrayList(parsed.Field) = .empty;
+        var relationships: std.ArrayList(parsed.Relationship) = .empty;
+        var relationship_indent: ?usize = null;
         var directives: std.ArrayList(parsed.Directive) = .empty;
         if (self.current.kind != .r_brace) {
             try self.lineEnd();
@@ -141,17 +144,82 @@ const Parser = struct {
                     try self.noDocs(field_docs);
                     break;
                 }
-                if (self.current.kind == .eof) return self.fail(self.current.span, "Expected '}' to close table");
+                if (self.current.kind == .eof) {
+                    try self.noDocs(field_docs);
+                    return self.fail(self.current.span, "Expected '}' to close table");
+                }
                 if (self.current.kind == .hash or self.current.kind == .question) {
                     try self.noDocs(field_docs);
+                    if (relationship_indent) |indent| {
+                        if (self.current.indent > indent) return self.fail(self.current.span, "Relationships cannot have directives or field constraints; configure the backing FK instead");
+                    }
+                    relationship_indent = null;
                     try directives.append(self.allocator, try self.directive(false));
                     try self.lineEnd();
-                } else try fields.append(self.allocator, try self.field(field_docs));
+                } else if (self.current.kind == .tilde) {
+                    relationship_indent = self.current.indent;
+                    try relationships.append(self.allocator, try self.relationship(field_docs));
+                } else {
+                    relationship_indent = null;
+                    try fields.append(self.allocator, try self.field(field_docs));
+                }
             }
         }
         const close = try self.take(.r_brace, "Expected '}' to close table");
         try self.lineEnd();
-        return .{ .name = token(first), .documentation = docs, .fields = try fields.toOwnedSlice(self.allocator), .directives = try directives.toOwnedSlice(self.allocator), .span = .{ .start = first.span.start, .end = close.span.end } };
+        return .{ .name = token(first), .documentation = docs, .fields = try fields.toOwnedSlice(self.allocator), .relationships = try relationships.toOwnedSlice(self.allocator), .directives = try directives.toOwnedSlice(self.allocator), .span = .{ .start = first.span.start, .end = close.span.end } };
+    }
+
+    fn relationship(self: *Parser, docs: ?parsed.Documentation) Error!parsed.Relationship {
+        const first = try self.take(.tilde, "Expected '~'");
+        if (self.current.kind == .bang or self.current.kind == .star)
+            return self.fail(self.current.span, "Relationships cannot have primary-key or stored-field markers");
+        const relationship_name = try self.name();
+        const target_name = try self.name();
+        var end = target_name.span.end;
+        var collection = false;
+        var nullable = false;
+        if (self.current.kind == .l_bracket) {
+            collection = true;
+            try self.advance();
+            end = (try self.take(.r_bracket, "Expected ']' in relationship collection type")).span.end;
+        }
+        if (self.current.kind == .question) {
+            if (collection) return self.fail(self.current.span, "Relationship collections cannot be nullable");
+            nullable = true;
+            end = self.current.span.end;
+            try self.advance();
+        }
+        const target_span: parsed.Span = .{ .start = target_name.span.start, .end = end };
+        try self.relationshipOptions();
+        _ = try self.take(.at, "Relationships require a direct @Table.field source mapping");
+        if (self.current.kind == .dot) return self.fail(self.current.span, "Connection shorthand @.field is unsupported");
+        const source_table = try self.name();
+        _ = try self.take(.dot, "Expected '.' in relationship source mapping @Table.field");
+        const source_field = try self.name();
+        try self.relationshipOptions();
+        try self.lineEnd();
+        if (self.current.indent > first.indent and (self.current.kind == .hash or self.current.kind == .question))
+            return self.fail(self.current.span, "Relationships cannot have directives or field constraints; configure the backing FK instead");
+        return .{
+            .name = token(relationship_name),
+            .target = .{ .name = token(target_name), .nullable = nullable, .span = target_span },
+            .collection = collection,
+            .source_table = token(source_table),
+            .source_field = token(source_field),
+            .documentation = docs,
+            .span = .{ .start = first.span.start, .end = source_field.span.end },
+        };
+    }
+
+    fn relationshipOptions(self: *Parser) Error!void {
+        switch (self.current.kind) {
+            .l_paren => return self.fail(self.current.span, "Relationships cannot have defaults"),
+            .bang, .star => return self.fail(self.current.span, "Relationships cannot have primary-key or stored-field markers"),
+            .l_brace, .equal => return self.fail(self.current.span, "Relationships cannot have braced or '=' bodies"),
+            .hash, .question => return self.fail(self.current.span, "Relationships cannot have directives or field constraints; configure the backing FK instead"),
+            else => {},
+        }
     }
 
     fn field(self: *Parser, docs: ?parsed.Documentation) Error!parsed.Field {
@@ -160,6 +228,7 @@ const Parser = struct {
         if (foreign_key) try self.advance();
         const primary = self.current.kind == .bang;
         if (primary) try self.advance();
+        if (self.current.kind == .tilde) return self.fail(self.current.span, "Relationships cannot have primary-key or stored-field markers");
         const field_name = try self.name();
         const type_name = try self.name();
         var end = type_name.span.end;
@@ -169,6 +238,7 @@ const Parser = struct {
             end = self.current.span.end;
             try self.advance();
         }
+        if (self.current.kind == .l_bracket) return self.fail(self.current.span, "Stored arrays are unsupported; [] is only allowed on virtual relationships");
         const type_span: parsed.Span = .{ .start = type_name.span.start, .end = end };
         const is_enum = !foreign_key and std.mem.eql(u8, type_name.text, "enum");
         var default: ?parsed.Default = null;

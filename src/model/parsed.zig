@@ -54,7 +54,21 @@ pub const Table = struct {
     name: Token,
     documentation: ?Documentation = null,
     fields: []const Field = &.{},
+    /// Virtual declarations, in source order; never stored fields.
+    relationships: []const Relationship = &.{},
     directives: []const Directive = &.{},
+    span: Span,
+};
+
+/// Direct backref syntax. Semantic cardinality and source validation is deferred.
+pub const Relationship = struct {
+    name: Token,
+    target: TypeRef,
+    collection: bool = false,
+    source_table: Token,
+    source_field: Token,
+    documentation: ?Documentation = null,
+    /// Entire declaration, including `~` and the mapping, excluding comments.
     span: Span,
 };
 
