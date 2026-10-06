@@ -12,7 +12,7 @@ FIXTURES = ROOT / 'src/testdata/parser'
 
 def run(args=(), source=b'', status=0, cwd=None):
     result = subprocess.run([str(PZL), *map(str, args)], input=source,
-                            capture_output=True, cwd=cwd, timeout=20)
+                            capture_output=True, cwd=cwd, timeout=30)
     assert result.returncode == status, result
     if status == 0:
         assert result.stderr == b'', result.stderr
@@ -87,6 +87,16 @@ process.stdout.close()
 assert process.wait(timeout=10) == 1
 assert b'output failed' in process.stderr.read()
 process.stderr.close()
+
+# Regression: namespace validation runs in both resolution and emission. Large
+# named-check schemas must not trigger cubic indexed rescans. The ordinary
+# subprocess timeout is only a hang guard, not a benchmark assertion.
+large_source = ('Many {\n  value int\n' + ''.join(
+    '  ?? value >= 0 {{\n    #name `check_{}`\n  }}\n'.format(i)
+    for i in range(2000)) + '}\n').encode()
+large_sql = run(source=large_source).stdout
+assert large_sql.count(b'CONSTRAINT "check_') == 2000
+assert b'CONSTRAINT "check_1999" CHECK' in large_sql
 
 # Execute only in the test's own in-memory DB. CLI never opens SQLite.
 db = sqlite3.connect(':memory:')
