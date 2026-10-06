@@ -7,13 +7,15 @@ const writeBlob = sql_writer.writeBlob;
 const resolved = @import("model/resolved.zig");
 const expression_emitter = @import("expression_emitter.zig");
 
-pub const Error = expression_emitter.Error || error{ NullablePrimaryKey, InvalidPrimaryKey, InvalidIdReuse, InvalidDefault, InvalidEnum, DefaultOnAutoPrimaryKey, InvalidCheck, InvalidUnique, InvalidIndex, SqlNameCollision };
+pub const Error = expression_emitter.Error || error{ NullablePrimaryKey, InvalidPrimaryKey, InvalidIdReuse, InvalidDefault, InvalidEnum, DefaultOnAutoPrimaryKey, InvalidCheck, InvalidUnique, InvalidIndex, SqlNameCollision, UnsupportedForeignKey };
 
 /// Emit tables and columns in schema order, then ordered table CHECK items.
 /// Zero-column tables (even checks-only tables) remain non-executable skeletons.
 /// Relationships are virtual and produce no SQL.
 /// NUL-containing SQL names, invalid primary keys, ID reuse options, and literal
-/// defaults and enum metadata are rejected before writing. Raw SQL is trusted
+/// defaults and enum metadata are rejected before writing. StoredFK Slice2
+/// metadata is rejected with UnsupportedForeignKey until Slice3 SQL support.
+/// Raw SQL is trusted
 /// and not syntax-validated, including direct resolved enum raw-SQL defaults.
 /// Writer failures may leave partial output. The caller owns and flushes the writer.
 pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
@@ -65,6 +67,8 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
             if (@import("expression_resolver.zig").validateCheckResult(&check) != null) return error.InvalidCheck;
         }
         for (table.columns, 0..) |column, column_index| {
+            // Slice2 resolves metadata only; never silently discard an FK.
+            if (column.foreign_key != null) return error.UnsupportedForeignKey;
             if (column.unique_constraints.len > 1) return error.InvalidUnique;
             for (column.unique_constraints) |unique| {
                 if (unique.nulls != .distinct or unique.columns.len != 0) return error.InvalidUnique;

@@ -18,7 +18,9 @@ these syntax decisions require implementation updates, not just resolver changes
 - `STRICT` tables by default.
 - SQL output, not an ORM or query generator.
 - Fresh-schema creation, not migrations.
-- Stored foreign keys, backrefs, and generated connection tables are planned.
+- Stored foreign-key syntax and target/type resolution are implemented (StoredFK
+  Slice2); FK SQL emission is next (Slice3). Backrefs and generated connection
+  tables remain planned.
 - Inline enums are implemented. Reusable types (including named enums) are
   deferred indefinitely; their examples below are design sketches, not supported syntax.
 - Role-named and multi-endpoint connections are included toward the end of v1.
@@ -939,6 +941,22 @@ settled. Custom names for a rule that expands into several physical SQL objects
 also need a deterministic naming convention.
 
 ## 12. Foreign keys and deletion behavior
+
+**Implementation status (StoredFK Slice2): resolution only.** `*field Table?`
+resolves exact DSL table names across forward/self references. A target must
+have exactly one declared PK field; hidden rowids, keyless tables, and composite
+keys are not targets. Logical types and enum allowed sets are inherited, but
+nullability, defaults, documentation, checks, and uniqueness are not. Local
+FK defaults are validated against the inherited type. Final local types are
+available to checks, uniqueness, and indexes. Resolved FK metadata owns the
+exact target SQL table/column names (including `#name`) and defaults to restrict.
+PK type dependencies may traverse forward FK chains; cycles without a concrete
+storage type are diagnosed. A self-FK to an ordinary integer PK is valid.
+`*!field` syntax parses, but shared-identity resolution remains unsupported
+until Slice5; `#allow reuse` is invalid on all FKs. FK SQL is next in Slice3:
+the emitter currently rejects any FK metadata before writing SQL, rather than
+silently omitting enforcement. Deletion directives, automatic FK indexes,
+backrefs, and connection tables below remain design, not implemented behavior.
 
 ```text
 Book {

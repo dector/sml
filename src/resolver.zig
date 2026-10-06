@@ -12,6 +12,9 @@ const expression_resolver = @import("expression_resolver.zig");
 pub const Category = enum {
     unsupported_feature,
     unknown_type,
+    unknown_foreign_key_target,
+    invalid_foreign_key_target,
+    foreign_key_cycle,
     invalid_identifier,
     duplicate_dsl_name,
     sql_name_collision,
@@ -125,7 +128,62 @@ const Context = struct {
         return output.toOwnedSlice(self.allocator);
     }
 
+    const TypeNode = struct {
+        state: enum { pending, visiting, done } = .pending,
+        concrete: ?parsed.Field = null,
+        target_table: ?usize = null,
+        target_column: ?usize = null,
+    };
+
+    // Phase one follows declared PK dependencies across the entire schema.
+    // It intentionally does not apply local PK generation/default policy.
+    fn inheritedType(self: *Context, input: parsed.Schema, graph: [][]TypeNode, ti: usize, ci: usize) Error!parsed.Field {
+        const node = &graph[ti][ci];
+        const field = input.tables[ti].fields[ci];
+        if (node.state == .done) return node.concrete.?;
+        if (node.state == .visiting)
+            return self.fail(.foreign_key_cycle, field.type.name.span, "Foreign-key type dependency cycle has no concrete underlying storage type");
+        node.state = .visiting;
+        if (field.primary_key and field.type.nullable)
+            return self.fail(.nullable_primary_key, field.type.span, "primary-key fields cannot be nullable");
+        const concrete = if (field.foreign_key) blk: {
+            const target = for (input.tables, 0..) |table, i| {
+                if (std.mem.eql(u8, table.name.text, field.type.name.text)) break i;
+            } else return self.fail(.unknown_foreign_key_target, field.type.name.span, "Unknown DSL table in foreign-key target");
+            var key: ?usize = null;
+            for (input.tables[target].fields, 0..) |candidate, i| {
+                if (!candidate.primary_key) continue;
+                if (key != null) return self.fail(.invalid_foreign_key_target, field.type.name.span, "Foreign-key target must have exactly one declared primary-key field (composite key is unsupported)");
+                key = i;
+            }
+            const ki = key orelse return self.fail(.invalid_foreign_key_target, field.type.name.span, "Foreign-key target must have exactly one declared primary-key field (no primary key declared)");
+            const pk = input.tables[target].fields[ki];
+            if (pk.type.nullable) return self.fail(.nullable_primary_key, pk.type.span, "primary-key fields cannot be nullable");
+            node.target_table = target;
+            node.target_column = ki;
+            break :blk try self.inheritedType(input, graph, target, ki);
+        } else field;
+        if (field.primary_key and std.mem.eql(u8, concrete.type.name.text, "bool"))
+            return self.fail(.invalid_primary_key, field.type.name.span, "Boolean fields cannot be primary keys (including composite keys)");
+        node.concrete = concrete;
+        node.state = .done;
+        return concrete;
+    }
+
     fn schema(self: *Context, input: parsed.Schema) Error!resolved.Schema {
+        const graph = try self.allocator.alloc([]TypeNode, input.tables.len);
+        // Validate DSL table identity before resolving references.
+        for (input.tables, 0..) |table, i| {
+            for (input.tables[0..i]) |previous| {
+                if (std.mem.eql(u8, previous.name.text, table.name.text))
+                    return self.fail(.duplicate_dsl_name, table.name.span, "duplicate DSL table name");
+            }
+            graph[i] = try self.allocator.alloc(TypeNode, table.fields.len);
+            @memset(graph[i], .{});
+        }
+        for (input.tables, 0..) |table, i| for (table.fields, 0..) |_, j| {
+            _ = try self.inheritedType(input, graph, i, j);
+        };
         const tables = try self.allocator.alloc(resolved.Table, input.tables.len);
         for (input.tables, 0..) |table, i| {
             for (input.tables[0..i]) |previous| {
@@ -144,8 +202,17 @@ const Context = struct {
             }
             const columns = try self.allocator.alloc(resolved.Column, table.fields.len);
             for (table.fields, 0..) |field, j| {
-                if (field.foreign_key)
-                    return self.fail(.unsupported_feature, field.span, "Stored foreign keys are not supported yet");
+                const concrete = graph[i][j].concrete.?;
+                if (field.foreign_key) {
+                    for (field.directives) |directive| {
+                        if (directive.kind == .allow_reuse)
+                            return self.fail(.invalid_id_reuse, directive.span, "#allow reuse is invalid on foreign-key fields");
+                        if (directive.kind == .of)
+                            return self.fail(.invalid_directive_scope, directive.span, "Foreign-key enum values are inherited; #of is not allowed");
+                    }
+                    if (field.primary_key)
+                        return self.fail(.unsupported_feature, field.span, "Primary-key foreign keys (shared identity) are not supported until StoredFK Slice5");
+                }
                 for (table.fields[0..j]) |previous| {
                     if (std.mem.eql(u8, previous.name.text, field.name.text))
                         return self.fail(.duplicate_dsl_name, field.name.span, "duplicate DSL field name");
@@ -156,9 +223,9 @@ const Context = struct {
                     if (std.ascii.eqlIgnoreCase(previous.sql_name, column_name))
                         return self.fail(.sql_name_collision, if (field_opts.name) |n| n.span else field.name.span, "SQL column names collide (ASCII case-insensitive)");
                 }
-                const storage: resolved.StorageType = if (std.mem.eql(u8, field.type.name.text, "int")) .integer else if (std.mem.eql(u8, field.type.name.text, "real")) .real else if (std.mem.eql(u8, field.type.name.text, "str")) .text else if (std.mem.eql(u8, field.type.name.text, "blob")) .blob else if (std.mem.eql(u8, field.type.name.text, "bool")) .boolean else if (std.mem.eql(u8, field.type.name.text, "datetime")) .datetime else if (std.mem.eql(u8, field.type.name.text, "enum")) .enumeration else return self.fail(.unknown_type, field.type.name.span, "unknown type; supported builtins are int, real, str, blob, bool, datetime, enum");
+                const storage: resolved.StorageType = if (std.mem.eql(u8, concrete.type.name.text, "int")) .integer else if (std.mem.eql(u8, concrete.type.name.text, "real")) .real else if (std.mem.eql(u8, concrete.type.name.text, "str")) .text else if (std.mem.eql(u8, concrete.type.name.text, "blob")) .blob else if (std.mem.eql(u8, concrete.type.name.text, "bool")) .boolean else if (std.mem.eql(u8, concrete.type.name.text, "datetime")) .datetime else if (std.mem.eql(u8, concrete.type.name.text, "enum")) .enumeration else return self.fail(.unknown_type, concrete.type.name.span, "unknown type; supported builtins are int, real, str, blob, bool, datetime, enum");
                 var enum_values: std.ArrayList([]const u8) = .empty;
-                for (field.directives) |directive| {
+                for (concrete.directives) |directive| {
                     if (directive.kind == .of) {
                         if (storage != .enumeration) return self.fail(.invalid_directive_scope, directive.span, "#of requires an enum field");
                         if (directive.kind.of.len == 0) return self.fail(.invalid_enum, directive.span, "#of cannot be empty");
@@ -171,7 +238,7 @@ const Context = struct {
                     }
                 }
                 if (storage == .enumeration and enum_values.items.len == 0)
-                    return self.fail(.invalid_enum, field.type.span, "enum requires a nonempty #of set");
+                    return self.fail(.invalid_enum, concrete.type.span, "enum requires a nonempty #of set");
                 if (field.primary_key and field.type.nullable)
                     return self.fail(.nullable_primary_key, field.type.span, "primary-key fields cannot be nullable");
                 if (field.primary_key and storage == .boolean)
@@ -185,7 +252,12 @@ const Context = struct {
                     const token = defaultToken(default);
                     if (field.primary_key and storage == .integer and key_count == 1)
                         return self.fail(.default_on_auto_primary_key, token.span, "auto-generated integer primary keys cannot have defaults");
-                    value = try self.defaultValue(default, storage, field.type.nullable);
+                    // A backtick FK default is enum text only after target lookup.
+                    const typed_default: parsed.Default = if (field.foreign_key and storage == .enumeration and default == .raw_sql)
+                        .{ .enum_text = default.raw_sql }
+                    else
+                        default;
+                    value = try self.defaultValue(typed_default, storage, field.type.nullable);
                     if (storage == .enumeration and value.? == .text and
                         !@import("enumeration.zig").contains(enum_values.items, value.?.text))
                         return self.fail(.invalid_default, token.span, "enum default is not in its allowed set");
@@ -218,6 +290,10 @@ const Context = struct {
                     .nullable = field.type.nullable,
                     .primary_key = if (field_opts.reuse != null) .allow_reuse else if (field.primary_key) .standard else .none,
                     .default = value,
+                    .foreign_key = if (graph[i][j].target_table) |target| .{
+                        .target_table_sql_name = try self.name(input.tables[target].name, (try self.options(input.tables[target].directives, true)).name),
+                        .target_column_sql_name = try self.name(input.tables[target].fields[graph[i][j].target_column.?].name, (try self.options(input.tables[target].fields[graph[i][j].target_column.?].directives, false)).name),
+                    } else null,
                     .documentation = try self.documentation(field.documentation),
                     .unique_constraints = try uniques.toOwnedSlice(self.allocator),
                 };

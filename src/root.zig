@@ -22,6 +22,7 @@ test {
     _ = expression_emitter;
     _ = @import("parser_integration_test.zig");
     _ = @import("foreign_key_syntax_test.zig");
+    _ = @import("foreign_key_resolution_test.zig");
     _ = @import("boolean_test.zig");
     _ = @import("datetime_test.zig");
     _ = @import("enum_test.zig");

@@ -96,6 +96,19 @@ preflights the whole schema before writing.
 Ordinary expressions such as `? unique == 'x'` still parse `unique` as an identifier.
 Unsupported later-v1 syntax returns a diagnostic.
 
+StoredFK Slice2 supports **resolution only**, not FK SQL yet. `*field Table?`
+looks up the exact DSL table name (including forward/self references), requires
+one declared PK field, and inherits its logical type and enum allowed values.
+SQL target names honor `#name` and are owned by the resolved schema. Nullability,
+defaults, docs, checks, and uniqueness belong to the local FK declaration;
+local defaults are validated against the inherited type. Enum FK defaults use
+bare words or backtick text; datetime FK defaults also accept `::now`.
+Keyless/composite targets and type-dependency cycles are diagnosed. `*!field`
+parses but shared-identity resolution waits for Slice5; `#allow reuse` is invalid
+on every FK. Delete actions and automatic FK indexes are not implemented.
+`emitter.emit` rejects FK metadata with `error.UnsupportedForeignKey` before
+writing anything; FK SQL is next in Slice3.
+
 `expression_parser.parse(allocator, source)` separately parses one literal,
 ordinary identifier reference (`[A-Za-z_][A-Za-z0-9_]*`), or standalone `_`
 current-value expression. `true`, `false`, and `null` remain literals; words

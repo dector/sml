@@ -107,20 +107,13 @@ fn unsupportedCase(allocator: std.mem.Allocator, input: []const u8) !void {
         return error.ExpectedUnsupportedFeature;
     }
     try std.testing.expectEqual(resolver.Category.unsupported_feature, result.diagnostic.category);
-    try std.testing.expectEqualStrings("Stored foreign keys are not supported yet", result.diagnostic.message);
+    try std.testing.expectEqualStrings("Primary-key foreign keys (shared identity) are not supported until StoredFK Slice5", result.diagnostic.message);
     const field = syntax.schema.schema.tables[0].fields[0];
     try std.testing.expectEqual(field.span, result.diagnostic.span);
 }
 
-test "stored FK is explicitly unsupported before unknown builtin PK or option handling" {
-    for ([_][]const u8{
-        "Label {\n  *owner Owner\n}\n",
-        "Label {\n  *owner Label?\n}\n",
-        "Label {\n  *!owner bool?\n}\n",
-        "Label {\n  *owner enum\n}\n",
-        "Label {\n  *!owner int(1) =\n    #allow reuse\n}\n",
-        source,
-    }) |input| try unsupportedCase(std.testing.allocator, input);
+test "stored FK primary shared identity remains unsupported" {
+    try unsupportedCase(std.testing.allocator, "Label {\n  *!owner Owner\n}\nOwner {\n  !id int\n}\n");
 }
 
 test "FK metadata defaults and inherited logical types remain separate from PK policy" {
@@ -145,6 +138,6 @@ test "FK syntax and unsupported resolution reclaim every allocation failure" {
     // Disable in-place arena growth to keep failure-sweep counts deterministic.
     var backing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .resize_fail_index = 0 });
     try std.testing.checkAllAllocationFailures(backing.allocator(), syntaxCase, .{});
-    try std.testing.checkAllAllocationFailures(backing.allocator(), unsupportedCase, .{source});
+    try std.testing.checkAllAllocationFailures(backing.allocator(), unsupportedCase, .{"Label {\n  *!owner Owner\n}\nOwner {\n  !id int\n}\n"});
     try std.testing.checkAllAllocationFailures(backing.allocator(), failureCase, .{ "T {\n  --- Owner.\n  *!", 21, 21 });
 }

@@ -139,7 +139,13 @@ unknown field references still fail resolution. Tests: `src/table_check_test.zig
 `table_checks.pzl`/SQL fixture, and `src/testdata/table_check_runtime_test.py`
 (INSERT and UPDATE enforcement). Field-check coverage remains intact.
 
-Other generators, date/JSON, expression indexes, FKs, relationships, and
+StoredFK Slice2 parses stored `*field Target?` (and `*!field Target`) and
+resolves non-PK FK target names and inherited logical types across forward/self
+references. PK+FK resolution waits for Slice5. FK SQL emission waits for Slice3;
+the emitter currently rejects FK metadata. No deletion directives or automatic
+FK indexes are implemented yet. See design §12 and
+`src/foreign_key_resolution_test.zig`.
+Other generators, date/JSON, expression indexes, relationships, and
 connections come in later slices. Reusable types are deferred indefinitely.
 Numeric exponent notation and multiline literals are deferred.
 

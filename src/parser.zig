@@ -173,7 +173,8 @@ const Parser = struct {
         const is_enum = std.mem.eql(u8, type_name.text, "enum");
         var default: ?parsed.Default = null;
         if (self.current.kind == .l_paren) {
-            self.lexer.enum_value_mode = is_enum;
+            // FK target types are not known until resolution; preserve enum words.
+            self.lexer.enum_value_mode = is_enum or foreign_key;
             try self.advance();
             try self.expressionTrivia();
             const value = self.current;
@@ -187,8 +188,8 @@ const Parser = struct {
                 .real => .{ .real = token(value) },
                 .string => .{ .text = token(value) },
                 .backtick => .{ .raw_sql = token(value) },
-                .generator => if (std.mem.eql(u8, type_name.text, "datetime")) .{ .generator = token(value) } else return self.fail(value.span, "Generators are supported only for datetime defaults"),
-                .identifier => if (self.word("null")) .{ .null_value = token(value) } else return self.fail(value.span, "Unsupported default; expected a literal or raw SQL"),
+                .generator => if (foreign_key or std.mem.eql(u8, type_name.text, "datetime")) .{ .generator = token(value) } else return self.fail(value.span, "Generators are supported only for datetime defaults"),
+                .identifier => if (self.word("null")) .{ .null_value = token(value) } else if (foreign_key) .{ .enum_text = token(value) } else return self.fail(value.span, "Unsupported default; expected a literal or raw SQL"),
                 else => return self.fail(value.span, "Expected default literal"),
             };
             self.lexer.enum_value_mode = false;

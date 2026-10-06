@@ -44,7 +44,9 @@ fn pipeline(allocator: std.mem.Allocator) !void {
 
 test "datetime source to SQL, ownership, and allocation failures" {
     try pipeline(std.testing.allocator);
-    try std.testing.checkAllAllocationFailures(std.testing.allocator, pipeline, .{});
+    // Arena growth can otherwise change allocation counts during the sweep.
+    var backing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .resize_fail_index = 0 });
+    try std.testing.checkAllAllocationFailures(backing.allocator(), pipeline, .{});
 }
 
 const valid_values = [_][]const u8{
