@@ -6,13 +6,13 @@ const parsed = @import("model/parsed.zig");
 const resolved = @import("model/resolved.zig");
 
 fn pipeline(allocator: std.mem.Allocator) !void {
-    var syntax = try parser.parse(allocator, @embedFile("testdata/parser/unique.pzl"));
+    var syntax = try parser.parse(allocator, @embedFile("testdata/parser/unique.sml"));
     try std.testing.expect(syntax == .schema);
     defer syntax.schema.deinit();
     const directive = syntax.schema.schema.tables[0].fields[0].directives[2];
     try std.testing.expect(directive.kind == .native_unique);
     try std.testing.expectEqual(@as(usize, 0), directive.kind.native_unique.fields.len);
-    try std.testing.expectEqualStrings("#name #`code\"constraint`#", @embedFile("testdata/parser/unique.pzl")[directive.kind.native_unique.options[0].span.start..directive.kind.native_unique.options[0].span.end]);
+    try std.testing.expectEqualStrings("#name #`code\"constraint`#", @embedFile("testdata/parser/unique.sml")[directive.kind.native_unique.options[0].span.start..directive.kind.native_unique.options[0].span.end]);
     var semantic = try resolver.resolve(allocator, syntax.schema.schema);
     try std.testing.expect(semantic == .schema);
     defer semantic.schema.deinit();
@@ -27,7 +27,7 @@ fn pipeline(allocator: std.mem.Allocator) !void {
 }
 
 fn compositePipeline(allocator: std.mem.Allocator) !void {
-    const source = try allocator.dupe(u8, @embedFile("testdata/parser/composite_unique.pzl"));
+    const source = try allocator.dupe(u8, @embedFile("testdata/parser/composite_unique.sml"));
     defer allocator.free(source);
     var semantic: resolver.Result = undefined;
     {

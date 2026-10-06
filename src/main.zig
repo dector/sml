@@ -7,7 +7,7 @@ pub fn main(init: std.process.Init) void {
 }
 
 fn report(stderr: *std.Io.Writer, operation: []const u8, failure: anyerror) void {
-    stderr.print("pzl: {s}: {s}\n", .{ operation, @errorName(failure) }) catch {};
+    stderr.print("sml: {s}: {s}\n", .{ operation, @errorName(failure) }) catch {};
 }
 
 fn run(init: std.process.Init) u8 {
@@ -48,7 +48,7 @@ fn run(init: std.process.Init) u8 {
     var reader = file.readerStreaming(io, &read_buffer);
     const source = reader.interface.allocRemaining(allocator, .limited(cli.max_source_bytes)) catch |failure| {
         if (failure == error.StreamTooLong) {
-            stderr.writeAll("pzl: input exceeds 16 MiB source limit\n") catch {};
+            stderr.writeAll("sml: input exceeds 16 MiB source limit\n") catch {};
         } else {
             report(stderr, "cannot read input", reader.err orelse failure);
         }

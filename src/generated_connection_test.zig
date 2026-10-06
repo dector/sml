@@ -2,7 +2,7 @@ const std = @import("std");
 const parser = @import("parser.zig");
 const resolver = @import("resolver.zig");
 const emitter = @import("emitter.zig");
-const source = @embedFile("testdata/parser/generated_connections.pzl");
+const source = @embedFile("testdata/parser/generated_connections.sml");
 const expected = @embedFile("testdata/parser/generated_connections.expect.sql");
 
 fn pipeline(allocator: std.mem.Allocator) !void {
@@ -53,7 +53,7 @@ test "generated connection full pipeline allocation failures" {
     try std.testing.checkAllAllocationFailures(backing.allocator(), pipeline, .{});
 }
 test "generated connections emit identical SQL to written keys" {
-    var syntax = try parser.parse(std.testing.allocator, @embedFile("testdata/parser/generated_connections_explicit.pzl"));
+    var syntax = try parser.parse(std.testing.allocator, @embedFile("testdata/parser/generated_connections_explicit.sml"));
     try std.testing.expect(syntax == .schema);
     defer syntax.schema.deinit();
     var result = try resolver.resolve(std.testing.allocator, syntax.schema.schema);

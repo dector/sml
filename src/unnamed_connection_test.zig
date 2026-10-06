@@ -3,7 +3,7 @@ const parser = @import("parser.zig");
 const resolver = @import("resolver.zig");
 const emitter = @import("emitter.zig");
 const resolved = @import("model/resolved.zig");
-const fixture = @embedFile("testdata/parser/unnamed_connections.pzl");
+const fixture = @embedFile("testdata/parser/unnamed_connections.sml");
 const parents = "Author {\n#name `Writer`\n!id int\n}\nBook {\n!id int\n}\n";
 
 fn pipeline(allocator: std.mem.Allocator) !void {

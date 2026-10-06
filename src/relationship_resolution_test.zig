@@ -7,7 +7,7 @@ const emitter = @import("emitter.zig");
 const resolved = @import("model/resolved.zig");
 
 test "singular relationship runtime fixture contains only stored enforcement SQL" {
-    var syntax = try parser.parse(std.testing.allocator, @embedFile("testdata/parser/singular_relationships.pzl"));
+    var syntax = try parser.parse(std.testing.allocator, @embedFile("testdata/parser/singular_relationships.sml"));
     defer syntax.schema.deinit();
     var result = try resolver.resolve(std.testing.allocator, syntax.schema.schema);
     defer result.schema.deinit();

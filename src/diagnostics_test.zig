@@ -7,35 +7,35 @@ const resolver = @import("resolver.zig");
 fn golden(source: []const u8, span: parsed.Span, expected: []const u8) !void {
     var output = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer output.deinit();
-    try diagnostics.format(&output.writer, "test.pzl", source, span, "bad", null);
+    try diagnostics.format(&output.writer, "test.sml", source, span, "bad", null);
     try std.testing.expectEqualStrings(expected, output.written());
 }
 
 test "diagnostics empty EOF points and zero length ranges" {
-    try golden("", .{ .start = 0, .end = 0 }, "test.pzl:1:1: error: bad\n  \n  ^\n");
-    try golden("abc", .{ .start = 3, .end = 3 }, "test.pzl:1:4: error: bad\n  abc\n     ^\n");
-    try golden("abc\n", .{ .start = 4, .end = 4 }, "test.pzl:2:1: error: bad\n  \n  ^\n");
-    try golden("abc", .{ .start = 1, .end = 1 }, "test.pzl:1:2: error: bad\n  abc\n   ^\n");
+    try golden("", .{ .start = 0, .end = 0 }, "test.sml:1:1: error: bad\n  \n  ^\n");
+    try golden("abc", .{ .start = 3, .end = 3 }, "test.sml:1:4: error: bad\n  abc\n     ^\n");
+    try golden("abc\n", .{ .start = 4, .end = 4 }, "test.sml:2:1: error: bad\n  \n  ^\n");
+    try golden("abc", .{ .start = 1, .end = 1 }, "test.sml:1:2: error: bad\n  abc\n   ^\n");
 }
 
 test "diagnostics CRLF lone CR and multiline first line underline" {
-    try golden("a\r\nbc\r\nd", .{ .start = 4, .end = 5 }, "test.pzl:2:2: error: bad\n  bc\n   ^\n");
-    try golden("a\rbc", .{ .start = 2, .end = 4 }, "test.pzl:2:1: error: bad\n  bc\n  ^~\n");
-    try golden("abc\r\ndef", .{ .start = 1, .end = 7 }, "test.pzl:1:2: error: bad\n  abc\n   ^~\nnote: span continues beyond this line\n");
-    try golden("a\r\nb", .{ .start = 2, .end = 2 }, "test.pzl:1:2: error: bad\n  a\n   ^\n");
+    try golden("a\r\nbc\r\nd", .{ .start = 4, .end = 5 }, "test.sml:2:2: error: bad\n  bc\n   ^\n");
+    try golden("a\rbc", .{ .start = 2, .end = 4 }, "test.sml:2:1: error: bad\n  bc\n  ^~\n");
+    try golden("abc\r\ndef", .{ .start = 1, .end = 7 }, "test.sml:1:2: error: bad\n  abc\n   ^~\nnote: span continues beyond this line\n");
+    try golden("a\r\nb", .{ .start = 2, .end = 2 }, "test.sml:1:2: error: bad\n  a\n   ^\n");
 }
 
 test "diagnostics Unicode columns tabs combining codepoints and interior bytes" {
-    try golden("é\t猫x", .{ .start = 6, .end = 7 }, "test.pzl:1:4: error: bad\n  é   猫x\n       ^\n");
-    try golden("é\t猫x", .{ .start = 3, .end = 6 }, "test.pzl:1:3: error: bad\n  é   猫x\n      ^\n");
-    try golden("éx", .{ .start = 1, .end = 2 }, "test.pzl:1:1: error: bad\n  éx\n  ^\n");
-    try golden("e\u{301}x", .{ .start = 3, .end = 4 }, "test.pzl:1:3: error: bad\n  e\u{301}x\n    ^\n");
-    try golden("\t\tx", .{ .start = 1, .end = 2 }, "test.pzl:1:2: error: bad\n          x\n      ^~~~\n");
+    try golden("é\t猫x", .{ .start = 6, .end = 7 }, "test.sml:1:4: error: bad\n  é   猫x\n       ^\n");
+    try golden("é\t猫x", .{ .start = 3, .end = 6 }, "test.sml:1:3: error: bad\n  é   猫x\n      ^\n");
+    try golden("éx", .{ .start = 1, .end = 2 }, "test.sml:1:1: error: bad\n  éx\n  ^\n");
+    try golden("e\u{301}x", .{ .start = 3, .end = 4 }, "test.sml:1:3: error: bad\n  e\u{301}x\n    ^\n");
+    try golden("\t\tx", .{ .start = 1, .end = 2 }, "test.sml:1:2: error: bad\n          x\n      ^~~~\n");
 }
 
 test "diagnostics sanitize malformed UTF8 NUL ESC and Unicode controls" {
-    try golden("a\x00\x1b\xff\xc2\x85\u{202e}z", .{ .start = 1, .end = 4 }, "test.pzl:1:2: error: bad\n  a\\x00\\x1B\\xFF\\u{85}\\u{202E}z\n   ^~~~~~~~~~~~\n");
-    try golden("\xc3x", .{ .start = 0, .end = 1 }, "test.pzl:1:1: error: bad\n  \\xC3x\n  ^~~~\n");
+    try golden("a\x00\x1b\xff\xc2\x85\u{202e}z", .{ .start = 1, .end = 4 }, "test.sml:1:2: error: bad\n  a\\x00\\x1B\\xFF\\u{85}\\u{202E}z\n   ^~~~~~~~~~~~\n");
+    try golden("\xc3x", .{ .start = 0, .end = 1 }, "test.sml:1:1: error: bad\n  \\xC3x\n  ^~~~\n");
     var output = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer output.deinit();
     try diagnostics.format(&output.writer, "a\n\x1b\t", "", .{ .start = 0, .end = 0 }, "m\r\x00", "c\xff");
@@ -67,7 +67,7 @@ test "diagnostics huge lines are bounded around the span and EOF" {
 
 test "diagnostics clipped excerpt and capped underline golden" {
     const source: [300]u8 = @splat('a');
-    const expected = "test.pzl:1:101: error: bad\n  ..." ++ @as([160]u8, @splat('a')) ++ "...\n  " ++ @as([43]u8, @splat(' ')) ++ "^" ++ @as([119]u8, @splat('~')) ++ "\n";
+    const expected = "test.sml:1:101: error: bad\n  ..." ++ @as([160]u8, @splat('a')) ++ "...\n  " ++ @as([43]u8, @splat(' ')) ++ "^" ++ @as([119]u8, @splat('~')) ++ "\n";
     try golden(&source, .{ .start = 100, .end = 300 }, expected);
 }
 
@@ -99,20 +99,20 @@ test "diagnostics parser named check unknown option and EOF golden" {
     try std.testing.expectEqualStrings("unique", source[result.diagnostic.span.start..result.diagnostic.span.end]);
     var output = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer output.deinit();
-    try diagnostics.formatParser(&output.writer, "schema.pzl", source, result.diagnostic);
-    try std.testing.expectEqualStrings("schema.pzl:3:2: error [syntax]: Only #name is supported in check options\n  #unique\n   ^~~~~~\n", output.written());
+    try diagnostics.formatParser(&output.writer, "schema.sml", source, result.diagnostic);
+    try std.testing.expectEqualStrings("schema.sml:3:2: error [syntax]: Only #name is supported in check options\n  #unique\n   ^~~~~~\n", output.written());
     output.clearRetainingCapacity();
     const eof_source = "T {\n?? true {\n#name `N`\n";
     const eof = try parser.parse(std.testing.allocator, eof_source);
     try std.testing.expect(eof == .diagnostic);
-    try diagnostics.formatParser(&output.writer, "schema.pzl", eof_source, eof.diagnostic);
-    try std.testing.expectEqualStrings("schema.pzl:4:1: error [syntax]: Expected '}' to close check options\n  \n  ^\n", output.written());
+    try diagnostics.formatParser(&output.writer, "schema.sml", eof_source, eof.diagnostic);
+    try std.testing.expectEqualStrings("schema.sml:4:1: error [syntax]: Expected '}' to close check options\n  \n  ^\n", output.written());
 }
 
 test "diagnostics resolver exact name and unknown field golden" {
     for ([_]struct { source: []const u8, token: []const u8, expected: []const u8 }{
-        .{ .source = "T {\n?? true {\n#name ``\n}\n}\n", .token = "``", .expected = "schema.pzl:3:7: error [invalid_identifier]: SQL identifier must be nonempty UTF-8 and contain no NUL\n  #name ``\n        ^~\n" },
-        .{ .source = "T {\na int\n?? missing > 0\n}\n", .token = "missing", .expected = "schema.pzl:3:4: error [invalid_check]: unknown DSL field name\n  ?? missing > 0\n     ^~~~~~~\n" },
+        .{ .source = "T {\n?? true {\n#name ``\n}\n}\n", .token = "``", .expected = "schema.sml:3:7: error [invalid_identifier]: SQL identifier must be nonempty UTF-8 and contain no NUL\n  #name ``\n        ^~\n" },
+        .{ .source = "T {\na int\n?? missing > 0\n}\n", .token = "missing", .expected = "schema.sml:3:4: error [invalid_check]: unknown DSL field name\n  ?? missing > 0\n     ^~~~~~~\n" },
     }) |case| {
         var syntax = try parser.parse(std.testing.allocator, case.source);
         try std.testing.expect(syntax == .schema);
@@ -123,7 +123,7 @@ test "diagnostics resolver exact name and unknown field golden" {
         try std.testing.expectEqualStrings(case.token, case.source[semantic.diagnostic.span.start..semantic.diagnostic.span.end]);
         var output = std.Io.Writer.Allocating.init(std.testing.allocator);
         defer output.deinit();
-        try diagnostics.formatResolver(&output.writer, "schema.pzl", case.source, semantic.diagnostic);
+        try diagnostics.formatResolver(&output.writer, "schema.sml", case.source, semantic.diagnostic);
         try std.testing.expectEqualStrings(case.expected, output.written());
     }
 }

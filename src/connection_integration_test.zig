@@ -2,7 +2,7 @@ const std = @import("std");
 const parser = @import("parser.zig");
 const resolver = @import("resolver.zig");
 const emitter = @import("emitter.zig");
-const source = @embedFile("testdata/parser/named_connections.pzl");
+const source = @embedFile("testdata/parser/named_connections.sml");
 const expected = @embedFile("testdata/parser/named_connections.expect.sql");
 
 fn ownedPipeline(allocator: std.mem.Allocator) !void {
@@ -90,7 +90,7 @@ test "named explicit connections parse resolve and emit clean up every allocatio
 }
 
 test "named connection SQL is byte identical to an equivalent ordinary explicit FK table" {
-    var syntax = try parser.parse(std.testing.allocator, @embedFile("testdata/parser/named_connections_ordinary.pzl"));
+    var syntax = try parser.parse(std.testing.allocator, @embedFile("testdata/parser/named_connections_ordinary.sml"));
     try std.testing.expect(syntax == .schema);
     defer syntax.schema.deinit();
     var result = try resolver.resolve(std.testing.allocator, syntax.schema.schema);

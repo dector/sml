@@ -5,7 +5,7 @@ const emitter = @import("emitter.zig");
 const resolved = @import("model/resolved.zig");
 
 fn pipeline(allocator: std.mem.Allocator) !void {
-    const source = try allocator.dupe(u8, @embedFile("testdata/parser/partial_index.pzl"));
+    const source = try allocator.dupe(u8, @embedFile("testdata/parser/partial_index.sml"));
     defer allocator.free(source);
     var semantic: resolver.Result = undefined;
     {

@@ -8,7 +8,7 @@ const resolved = @import("model/resolved.zig");
 
 fn booleanPipeline(allocator: std.mem.Allocator) !void {
     // Both arenas must be independent of the source and of each other.
-    const source = try allocator.dupe(u8, @embedFile("testdata/parser/boolean.pzl"));
+    const source = try allocator.dupe(u8, @embedFile("testdata/parser/boolean.sml"));
     var syntax = parser.parse(allocator, source) catch |err| {
         allocator.free(source);
         return err;

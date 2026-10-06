@@ -10,13 +10,13 @@ Requires Zig 0.17.0. Build the library and compiler:
 
 ```sh
 zig build
-./zig-out/bin/pzl schema.pzl > schema.sql
-cat schema.pzl | ./zig-out/bin/pzl > schema.sql
-zig build run -- schema.pzl
+./zig-out/bin/sml schema.sml > schema.sql
+cat schema.sml | ./zig-out/bin/sml > schema.sql
+zig build run -- schema.sml
 ```
 
-`pzl [FILE|-]` reads one file, or stdin until EOF when omitted or `-`.
-Use `pzl -- -schema.pzl` for filenames beginning with `-`. Quote filenames
+`sml [FILE|-]` reads one file, or stdin until EOF when omitted or `-`.
+Use `sml -- -schema.sml` for filenames beginning with `-`. Quote filenames
 containing spaces. `--help` and `-h` print usage to stdout; help must be the
 only argument. Unknown options (including `--version`) and extra arguments
 print usage to stderr without reading input.
@@ -50,7 +50,7 @@ Parser errors use `[syntax]`; resolver errors use the category's enum tag name.
 For example, an unknown field in `?? missing > 0` produces:
 
 ```text
-schema.pzl:3:4: error [invalid_check]: unknown DSL field name
+schema.sml:3:4: error [invalid_check]: unknown DSL field name
   ?? missing > 0
      ^~~~~~~
 ```
@@ -255,7 +255,7 @@ Relationships cannot carry defaults/directives. Public relationship metadata is
 validated across the whole schema before any SQL is written; invalid mappings,
 indices, names, collisions, or cardinality proofs return `InvalidRelationship`.
 
-```pzl
+```sml
 Owner {
   !id int
   --- All stored items for this owner
@@ -323,7 +323,7 @@ not affect generated DSL names; ordinary SQL normalization remains unchanged.
 An explicit field with the exact generated DSL name overrides that slot without
 moving it or adding a duplicate. For example:
 
-```pzl
+```sml
 ~Books(Author, Book) {
   ~~
   --- Custom writer column.

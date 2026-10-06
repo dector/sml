@@ -1,4 +1,4 @@
-"""Build once and test the real pzl executable (no database side effects)."""
+"""Build once and test the real sml executable (no database side effects)."""
 import pathlib
 import sqlite3
 import subprocess
@@ -6,12 +6,12 @@ import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 subprocess.run(['zig', 'build'], cwd=ROOT, check=True)
-PZL = ROOT / 'zig-out/bin/pzl'
+SML = ROOT / 'zig-out/bin/sml'
 FIXTURES = ROOT / 'src/testdata/parser'
 
 
 def run(args=(), source=b'', status=0, cwd=None):
-    result = subprocess.run([str(PZL), *map(str, args)], input=source,
+    result = subprocess.run([str(SML), *map(str, args)], input=source,
                             capture_output=True, cwd=cwd, timeout=30)
     assert result.returncode == status, result
     if status == 0:
@@ -23,21 +23,21 @@ def run(args=(), source=b'', status=0, cwd=None):
     return result
 
 
-source = (FIXTURES / 'named_checks.pzl').read_bytes()
+source = (FIXTURES / 'named_checks.sml').read_bytes()
 expected = (FIXTURES / 'named_checks.expect.sql').read_bytes()
 assert run(source=source).stdout == expected
 assert run(['-'], source).stdout == expected
-assert run([FIXTURES / 'named_checks.pzl']).stdout == expected
+assert run([FIXTURES / 'named_checks.sml']).stdout == expected
 assert run().stdout == b'PRAGMA foreign_keys = ON;\n'
 assert run(['-']).stdout == b'PRAGMA foreign_keys = ON;\n'
 for flag in ['--help', '-h']:
-    assert run([flag]).stdout.startswith(b'Usage: pzl [FILE|-]\n')
+    assert run([flag]).stdout.startswith(b'Usage: sml [FILE|-]\n')
 for args in [['--version'], ['--unknown'], ['-x'], ['a', 'b'],
              ['--help', 'a'], ['a', '-h'], ['--', 'a', 'b']]:
     assert run(args, status=2).stderr.startswith(b'Usage:')
 
 # Invalid arguments must return even when stdin remains open (no EOF).
-process = subprocess.Popen([str(PZL), '--unknown'], stdin=subprocess.PIPE,
+process = subprocess.Popen([str(SML), '--unknown'], stdin=subprocess.PIPE,
                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 assert process.wait(timeout=5) == 2
 assert process.stdout.read() == b''
@@ -63,25 +63,25 @@ assert run(source=b' ' * (16 * 1024 * 1024)).stdout == b'PRAGMA foreign_keys = O
 
 with tempfile.TemporaryDirectory() as tmp:
     directory = pathlib.Path(tmp)
-    for name in ['with spaces.pzl', '-schema.pzl']:
+    for name in ['with spaces.sml', '-schema.sml']:
         path = directory / name
         path.write_bytes(source)
         assert run(['--', name], cwd=directory).stdout == expected
         assert path.read_bytes() == source
-    bad = directory / 'bad.pzl'
+    bad = directory / 'bad.sml'
     bad.write_bytes(semantic)
     assert run([bad], status=1).stderr.startswith(str(bad).encode() + b':2:9:')
     assert bad.read_bytes() == semantic
-    control_path = directory / '\x1bfile.pzl'
+    control_path = directory / '\x1bfile.sml'
     control_path.write_bytes(b'\xff')
-    assert b'\\x1Bfile.pzl' in run([control_path], status=1).stderr
+    assert b'\\x1Bfile.sml' in run([control_path], status=1).stderr
     assert b'cannot open input: FileNotFound' in run([directory / 'missing'], status=1).stderr
     assert b'cannot read input:' in run([directory], status=1).stderr
     assert sorted(p.name for p in directory.iterdir()) == sorted([
-        'with spaces.pzl', '-schema.pzl', 'bad.pzl', '\x1bfile.pzl'])
+        'with spaces.sml', '-schema.sml', 'bad.sml', '\x1bfile.sml'])
 
 # Broken stdout is an ordinary exit-1 IO failure, not a panic or SIGPIPE.
-process = subprocess.Popen([str(PZL), FIXTURES / 'named_checks.pzl'],
+process = subprocess.Popen([str(SML), FIXTURES / 'named_checks.sml'],
                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 process.stdout.close()
 assert process.wait(timeout=10) == 1

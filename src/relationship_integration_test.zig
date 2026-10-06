@@ -5,8 +5,8 @@ const emitter = @import("emitter.zig");
 const parsed = @import("model/parsed.zig");
 const resolved = @import("model/resolved.zig");
 
-const source = @embedFile("testdata/parser/direct_relationships.pzl");
-const stored_source = @embedFile("testdata/parser/direct_relationships_stored.pzl");
+const source = @embedFile("testdata/parser/direct_relationships.sml");
+const stored_source = @embedFile("testdata/parser/direct_relationships_stored.sml");
 const expected = @embedFile("testdata/parser/direct_relationships.expect.sql");
 const declarations = [_][]const u8{
     "~items Item[] @Item.owner",

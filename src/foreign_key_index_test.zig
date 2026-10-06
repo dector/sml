@@ -4,7 +4,7 @@ const resolver = @import("resolver.zig");
 const emitter = @import("emitter.zig");
 
 fn pipeline(allocator: std.mem.Allocator) !void {
-    const source = try allocator.dupe(u8, @embedFile("testdata/parser/foreign_key_indexes.pzl"));
+    const source = try allocator.dupe(u8, @embedFile("testdata/parser/foreign_key_indexes.sml"));
     defer allocator.free(source);
     var syntax = try parser.parse(allocator, source);
     try std.testing.expect(syntax == .schema);

@@ -5,7 +5,7 @@ const emitter = @import("emitter.zig");
 const resolved = @import("model/resolved.zig");
 
 test "connection relationship runtime fixture emits only stored objects" {
-    var syntax = try parser.parse(std.testing.allocator, @embedFile("testdata/parser/connection_relationships.pzl"));
+    var syntax = try parser.parse(std.testing.allocator, @embedFile("testdata/parser/connection_relationships.sml"));
     defer syntax.schema.deinit();
     var result = try resolver.resolve(std.testing.allocator, syntax.schema.schema);
     try std.testing.expect(result == .schema);

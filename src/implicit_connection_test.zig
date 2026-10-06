@@ -2,7 +2,7 @@ const std = @import("std");
 const parser = @import("parser.zig");
 const resolver = @import("resolver.zig");
 const emitter = @import("emitter.zig");
-const fixture = @embedFile("testdata/parser/implicit_connections.pzl");
+const fixture = @embedFile("testdata/parser/implicit_connections.sml");
 
 fn pipeline(allocator: std.mem.Allocator) !void {
     var result = blk: {

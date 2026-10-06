@@ -5,7 +5,7 @@ const emitter = @import("emitter.zig");
 const resolved = @import("model/resolved.zig");
 
 fn uniquePipeline(allocator: std.mem.Allocator) !void {
-    const source = try allocator.dupe(u8, @embedFile("testdata/parser/unique_index.pzl"));
+    const source = try allocator.dupe(u8, @embedFile("testdata/parser/unique_index.sml"));
     defer allocator.free(source);
     var semantic: resolver.Result = undefined;
     {
@@ -108,7 +108,7 @@ test "unique and ordinary indexes share unchanged generated names and global nam
 }
 
 fn pipeline(allocator: std.mem.Allocator) !void {
-    const source = try allocator.dupe(u8, @embedFile("testdata/parser/index.pzl"));
+    const source = try allocator.dupe(u8, @embedFile("testdata/parser/index.sml"));
     defer allocator.free(source);
     var semantic: resolver.Result = undefined;
     {

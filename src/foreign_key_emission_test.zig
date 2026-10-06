@@ -5,7 +5,7 @@ const emitter = @import("emitter.zig");
 const resolved = @import("model/resolved.zig");
 
 fn pipelineFixture(allocator: std.mem.Allocator, comptime fixture: []const u8) !void {
-    const source = try allocator.dupe(u8, @embedFile("testdata/parser/" ++ fixture ++ ".pzl"));
+    const source = try allocator.dupe(u8, @embedFile("testdata/parser/" ++ fixture ++ ".sml"));
     defer allocator.free(source);
     var syntax = try parser.parse(allocator, source);
     try std.testing.expect(syntax == .schema);

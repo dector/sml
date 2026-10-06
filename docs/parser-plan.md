@@ -13,7 +13,7 @@ scope; builtin checks stay unnamed. Names emit safely quoted CONSTRAINT labels
 and SQLite INSERT/UPDATE errors expose the exact label. Tests cover forward
 references, nullable UNKNOWN, NULL rewrites, trusted raw SQL, quoting, namespace
 collisions and full-pipeline allocation failures (`src/named_check_test.zig`,
-`named_checks.pzl`/SQL and `src/testdata/named_check_runtime_test.py`).
+`named_checks.sml`/SQL and `src/testdata/named_check_runtime_test.py`).
 
 Status: the first supported parser milestone (stages 1–4) is implemented and
 covered by tokenizer, parser, allocation-failure, and source-to-SQL tests.
@@ -132,7 +132,7 @@ backticks are text, not SQL. Backtick values may contain valid UTF-8 and NUL;
 malformed UTF-8 is rejected.
 Enum and `str` SQL text share quoted chunks plus `char(0)` for NUL, preserving
 text in UTF-8/UTF-16 (see design section 15). Tests: `src/enum_test.zig`, the
-`enum.pzl`/SQL fixture, and `src/testdata/enum_runtime_test.py`.
+`enum.sml`/SQL fixture, and `src/testdata/enum_runtime_test.py`.
 
 Slice12 field checks are implemented end-to-end: `? expr` and `#check expr`
 in both `=` and braced field bodies. The expression stream parser retains
@@ -149,7 +149,7 @@ follow builtin enum/bool/date/datetime checks and preserve their source order.
 `_ != null` emits `IS NOT NULL`; ordinary nullable comparisons retain SQL UNKNOWN.
 Named expression CHECK bodies and native UNIQUE constraint names are supported
 as described in Slice1 above.
-Tests: `src/check_test.zig`, `src/check_extra_test.zig`, `checks.pzl`/SQL fixture,
+Tests: `src/check_test.zig`, `src/check_extra_test.zig`, `checks.sml`/SQL fixture,
 and `src/testdata/check_runtime_test.py`.
 
 Slice13 table checks are implemented end-to-end: direct table `?? expr` and
@@ -165,7 +165,7 @@ preflights every check before writing, then emits table CHECK items after column
 and any composite primary key with proper commas. Zero-column tables, including
 literal checks-only tables, retain the existing non-executable skeleton policy;
 unknown field references still fail resolution. Tests: `src/table_check_test.zig`,
-`table_checks.pzl`/SQL fixture, and `src/testdata/table_check_runtime_test.py`
+`table_checks.sml`/SQL fixture, and `src/testdata/table_check_runtime_test.py`
 (INSERT and UPDATE enforcement). Field-check coverage remains intact.
 
 StoredFK Slice5 parses stored `*field Target?` (and `*!field Target`), resolves

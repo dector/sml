@@ -7,7 +7,7 @@ const date = @import("date.zig");
 
 fn pipeline(allocator: std.mem.Allocator) !void {
     var semantic = blk: {
-        const source = try allocator.dupe(u8, @embedFile("testdata/parser/date.pzl"));
+        const source = try allocator.dupe(u8, @embedFile("testdata/parser/date.sml"));
         defer allocator.free(source);
         var syntax = try parser.parse(allocator, source);
         try std.testing.expect(syntax == .schema);

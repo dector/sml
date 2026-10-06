@@ -3,7 +3,7 @@ const std = @import("std");
 const compiler = @import("sml");
 
 pub const max_source_bytes = 16 * 1024 * 1024;
-pub const usage = "Usage: pzl [FILE|-]\n       pzl --help\nReads stdin by default. Use -- before a filename beginning with -.\n";
+pub const usage = "Usage: sml [FILE|-]\n       sml --help\nReads stdin by default. Use -- before a filename beginning with -.\n";
 pub const Arguments = union(enum) { input: ?[]const u8, help, invalid };
 
 /// Validate the entire argument list before reading input or displaying help.
@@ -77,7 +77,7 @@ fn allocationExercise(allocator: std.mem.Allocator) !void {
     defer out.deinit();
     var err: std.Io.Writer.Allocating = .init(allocator);
     defer err.deinit();
-    const ok = compile(allocator, "fixture", @embedFile("testdata/parser/named_checks.pzl"), &out.writer, &err.writer) catch |failure| {
+    const ok = compile(allocator, "fixture", @embedFile("testdata/parser/named_checks.sml"), &out.writer, &err.writer) catch |failure| {
         try std.testing.expectEqualStrings("", out.written());
         return if (failure == error.WriteFailed) error.OutOfMemory else failure;
     };

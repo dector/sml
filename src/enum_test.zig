@@ -11,7 +11,7 @@ fn pipeline(backing: std.mem.Allocator) !void {
     vtable.resize = std.mem.Allocator.noResize;
     vtable.remap = std.mem.Allocator.noRemap;
     const allocator: std.mem.Allocator = .{ .ptr = backing.ptr, .vtable = &vtable };
-    const source = try allocator.dupe(u8, @embedFile("testdata/parser/enum.pzl"));
+    const source = try allocator.dupe(u8, @embedFile("testdata/parser/enum.sml"));
     var syntax = parser.parse(allocator, source) catch |err| {
         allocator.free(source);
         return err;

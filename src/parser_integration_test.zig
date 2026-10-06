@@ -4,7 +4,7 @@ const resolver = @import("resolver.zig");
 const emitter = @import("emitter.zig");
 
 test "source to SQL fixture covers supported parser milestone" {
-    var syntax = try parser.parse(std.testing.allocator, @embedFile("testdata/parser/subset.pzl"));
+    var syntax = try parser.parse(std.testing.allocator, @embedFile("testdata/parser/subset.sml"));
     try std.testing.expect(syntax == .schema);
     defer syntax.schema.deinit();
     var semantic = try resolver.resolve(std.testing.allocator, syntax.schema.schema);
@@ -17,7 +17,7 @@ test "source to SQL fixture covers supported parser milestone" {
 }
 
 test "source docs fixture preserves attachment and is emitted safely" {
-    var syntax = try parser.parse(std.testing.allocator, @embedFile("testdata/parser/documentation.pzl"));
+    var syntax = try parser.parse(std.testing.allocator, @embedFile("testdata/parser/documentation.sml"));
     try std.testing.expect(syntax == .schema);
     defer syntax.schema.deinit();
     var semantic = try resolver.resolve(std.testing.allocator, syntax.schema.schema);

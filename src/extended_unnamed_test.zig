@@ -4,7 +4,7 @@ const resolver = @import("resolver.zig");
 const emitter = @import("emitter.zig");
 const resolved = @import("model/resolved.zig");
 const identity = @import("connection_identity.zig");
-const fixture = @embedFile("testdata/parser/extended_unnamed.pzl");
+const fixture = @embedFile("testdata/parser/extended_unnamed.sml");
 
 fn resolve(allocator: std.mem.Allocator, source: []const u8) !resolver.OwnedSchema {
     var syntax = try parser.parse(allocator, source);
