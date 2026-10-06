@@ -32,6 +32,12 @@ pub const Category = enum {
     invalid_check,
     invalid_unique,
     invalid_index,
+    unknown_relationship_target,
+    unknown_relationship_source,
+    unknown_relationship_field,
+    invalid_relationship_mapping,
+    invalid_relationship_owner,
+    unsupported_connection_relationship,
 };
 
 pub const Diagnostic = struct {
@@ -175,10 +181,6 @@ const Context = struct {
     }
 
     fn schema(self: *Context, input: parsed.Schema) Error!resolved.Schema {
-        for (input.tables) |table| {
-            if (table.relationships.len > 0)
-                return self.fail(.unsupported_feature, table.relationships[0].span, "Virtual relationship resolution is unsupported");
-        }
         const graph = try self.allocator.alloc([]TypeNode, input.tables.len);
         // Validate DSL table identity before resolving references.
         for (input.tables, 0..) |table, i| {
@@ -433,7 +435,64 @@ const Context = struct {
             }
             table.indexes = try indexes.toOwnedSlice(self.allocator);
         }
-        return .{ .tables = tables };
+        return .{ .tables = tables, .relationships = try self.relationships(input, tables) };
+    }
+
+    // Direct backrefs use DSL identity for lookup and final SQL identity for FK
+    // validation. Virtual names never enter the SQL identifier namespace.
+    fn relationships(self: *Context, input: parsed.Schema, tables: []const resolved.Table) Error![]const resolved.Relationship {
+        var output: std.ArrayList(resolved.Relationship) = .empty;
+        for (input.tables, 0..) |table, owner| {
+            for (table.relationships, 0..) |relationship, ri| {
+                for (table.fields) |field| {
+                    if (std.mem.eql(u8, field.name.text, relationship.name.text))
+                        return self.fail(.duplicate_dsl_name, relationship.name.span, "Relationship name collides with a stored field");
+                }
+                for (table.relationships[0..ri]) |prior| {
+                    if (std.mem.eql(u8, prior.name.text, relationship.name.text))
+                        return self.fail(.duplicate_dsl_name, relationship.name.span, "duplicate DSL relationship name");
+                }
+                if (!relationship.collection)
+                    return self.fail(.unsupported_feature, relationship.span, "Singular relationships are unsupported until uniqueness validation is implemented");
+                if (relationship.target.nullable)
+                    return self.fail(.invalid_relationship_mapping, relationship.target.span, "Relationship collections cannot be nullable");
+                const target = for (tables, 0..) |candidate, ti| {
+                    if (std.mem.eql(u8, candidate.dsl_name, relationship.target.name.text)) break ti;
+                } else return self.fail(.unknown_relationship_target, relationship.target.name.span, "Unknown DSL table in relationship target");
+                const source = for (tables, 0..) |candidate, ti| {
+                    if (std.mem.eql(u8, candidate.dsl_name, relationship.source_table.text)) break ti;
+                } else return self.fail(.unknown_relationship_source, relationship.source_table.span, "Unknown DSL table in relationship source");
+                if (source != target)
+                    return self.fail(.unsupported_connection_relationship, relationship.source_table.span, "Connection relationships are unsupported: direct source table must equal target table");
+                const backing = for (tables[source].columns, 0..) |column, ci| {
+                    if (std.mem.eql(u8, column.dsl_name, relationship.source_field.text)) break ci;
+                } else return self.fail(.unknown_relationship_field, relationship.source_field.span, "Unknown stored DSL field in relationship source");
+                const fk = tables[source].columns[backing].foreign_key orelse
+                    return self.fail(.invalid_relationship_mapping, relationship.source_field.span, "Relationship source must be a stored foreign-key field");
+                var pk: ?usize = null;
+                for (tables[owner].columns, 0..) |column, ci| {
+                    if (column.primary_key == .none) continue;
+                    if (pk != null)
+                        return self.fail(.invalid_relationship_owner, relationship.span, "Relationship owner must have exactly one primary-key field");
+                    pk = ci;
+                }
+                const key = pk orelse return self.fail(.invalid_relationship_owner, relationship.span, "Relationship owner must have exactly one primary-key field");
+                if (!std.mem.eql(u8, fk.target_table_sql_name, tables[owner].sql_name) or
+                    !std.mem.eql(u8, fk.target_column_sql_name, tables[owner].columns[key].sql_name))
+                    return self.fail(.invalid_relationship_mapping, relationship.source_field.span, "Relationship source foreign key must reference the owner's single primary key");
+                try output.append(self.allocator, .{
+                    .dsl_name = try self.allocator.dupe(u8, relationship.name.text),
+                    .owner_table_index = owner,
+                    .target_table_index = target,
+                    .source_table_index = source,
+                    .backing_column_index = backing,
+                    .cardinality = .many,
+                    .documentation = try self.documentation(relationship.documentation),
+                    .span = relationship.span,
+                });
+            }
+        }
+        return output.toOwnedSlice(self.allocator);
     }
 
     fn fkCovered(table: resolved.Table, ci: usize) bool {

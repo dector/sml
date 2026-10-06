@@ -135,6 +135,19 @@ SQLite enforcement requires `PRAGMA foreign_keys = ON` **on every connection,
 before starting a transaction**. The emitted script includes this PRAGMA, but
 running it inside an already-open transaction does not enable enforcement.
 
+VirtualRelationships Slice2 resolves direct collections such as
+`~books Book[] @Book.publisher`. Target and source use exact DSL table names;
+they must be the same table. The source names a stored FK pointing to the owner's
+single PK, using final SQL names (including `#name`). The collection target may
+be keyless. Forward/self mappings work. Virtual names share the exact,
+case-sensitive DSL namespace with stored fields and other relationships, not
+SQL identifiers. Owned metadata preserves docs/spans and table/declaration order;
+relationships produce no SQL. Documentation output placement is undecided.
+Singular relationships (`Author?` or `Author`) await Slice3 uniqueness validation
+and are explicitly unsupported, as are connection relationships. Collections
+cannot be nullable or carry defaults/directives. Public relationship indices are
+currently ignored by emission; independent metadata preflight is still pending.
+
 `expression_parser.parse(allocator, source)` separately parses one literal,
 ordinary identifier reference (`[A-Za-z_][A-Za-z0-9_]*`), or standalone `_`
 current-value expression. `true`, `false`, and `null` remain literals; words

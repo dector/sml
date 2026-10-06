@@ -155,7 +155,20 @@ leading FK columns cover the lookup; otherwise a deterministic ordinary index
 is generated. Partial indexes do not cover it. See design §12,
 `src/foreign_key_index_test.zig`, and `src/foreign_key_resolution_test.zig`,
 `src/foreign_key_emission_test.zig`, and the Python runtime fixture.
-Other generators, date/JSON, expression indexes, relationships, and
+VirtualRelationships Slice2 resolves direct collections (`~books Book[]
+@Book.publisher`) after all columns/FKs and SQL names are finalized. Target/source
+lookups use exact DSL names; source must equal target, and its stored FK must
+reference the owner's single PK. The target itself may be keyless. Forward and
+self mappings are supported. Virtual names collide only with exact DSL field or
+relationship names, never normalized SQL identifiers. Centralized owned metadata
+preserves docs/spans and table then relationship declaration order, without SQL
+objects or documentation placement. Singular mappings await Slice3 uniqueness
+validation and return an explicit unsupported diagnostic. Connection mappings
+are also unsupported. Nullable collections are rejected, including manually
+built parsed models; the relationship model has no option payload. Emitter
+preflight for publicly constructed relationship indices remains pending.
+See `src/relationship_resolution_test.zig` for ownership/OOM and mapping coverage.
+Other generators, date/JSON, expression indexes, singular relationships, and
 connections come in later slices. Reusable types are deferred indefinitely.
 Numeric exponent notation and multiline literals are deferred.
 

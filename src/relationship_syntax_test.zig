@@ -73,8 +73,8 @@ test "direct relationships preserve names cardinality full spans docs and separa
     // Duplicates and required singular cardinality are deferred, not silently dropped.
     const semantic = try resolver.resolve(std.testing.allocator, syntax.schema.schema);
     try std.testing.expect(semantic == .diagnostic);
-    try std.testing.expectEqualDeep(collection.span, semantic.diagnostic.span);
-    try std.testing.expectEqual(.unsupported_feature, semantic.diagnostic.category);
+    try std.testing.expectEqualDeep(collection.target.name.span, semantic.diagnostic.span);
+    try std.testing.expectEqual(.unknown_relationship_target, semantic.diagnostic.category);
 }
 
 test "relationship mapping and options have explicit diagnostics" {

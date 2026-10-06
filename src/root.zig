@@ -23,6 +23,7 @@ test {
     _ = @import("parser_integration_test.zig");
     _ = @import("foreign_key_syntax_test.zig");
     _ = @import("relationship_syntax_test.zig");
+    _ = @import("relationship_resolution_test.zig");
     _ = @import("foreign_key_resolution_test.zig");
     _ = @import("foreign_key_emission_test.zig");
     _ = @import("foreign_key_action_test.zig");
