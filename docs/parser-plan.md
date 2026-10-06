@@ -424,8 +424,14 @@ Extend syntax models, parser, resolver, emitter, and tests together:
    full parse→resolve→emit OOM coverage, and runtime payload/default/constraint,
    custom-name deletion, explicit-key omission, and reverse-index coverage checks.
    Implemented explicit keys retain authored PK field order, not header order;
-   keys are not prefilled. Nested endpoints, unnamed connections, and `~~`
-   generated keys remain deferred. Agreed future rules (design §14): generated
+   keys are not prefilled without `~~`. Named `~~` generation and same-DSL-name
+   overrides are implemented. Expansion uses resolver-owned arrays, preserves
+   source metadata, and places keys in header order before source-ordered extras.
+   Overrides retain stored-FK/PK/nonnullable/exact-endpoint roles and reject reuse;
+   ordinary docs, names, actions, valid defaults, checks, uniques and indexes apply.
+   Duplicate explicit names remain errors. Multi/self override pipelines have OOM,
+   ownership and SQLite runtime coverage. Nested endpoints and unnamed generation
+   remain deferred. Generated
    DSL key names concatenate `camelCase(table-or-role DSL name)` and
    `PascalCase(PK DSL field name)` (`Author.id` → `authorId`; role `writer` with
    `accountKey` → `writerAccountKey`); existing SQL normalization still applies.
@@ -434,8 +440,9 @@ Extend syntax models, parser, resolver, emitter, and tests together:
    ASCII case-sensitive comparison rather than SQL names. Repeated tables still
    require distinct roles. Generated composite PKs follow generated field order;
    explicit keys keep authored order, and overrides do not move generated slots.
-   Acronym/underscore component casing needs consistent clarification during
-   implementation; these design choices do not add current feature support.
+   Named casing removes underscores, uppercases the following byte, and changes
+   only the initial byte otherwise (`URL` → `uRL`), preserving humps. Unnamed
+   sorting is future design, not current feature support.
 5. Remaining directives and multiline literals after their rules are finalized.
 
 Do not build a full-v1 parser ahead of models and semantic support.

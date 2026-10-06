@@ -67,12 +67,34 @@ pub fn expand(ctx: anytype, source: parsed.Schema) @TypeOf(ctx.*).Error!parsed.S
             if (!@import("unique.zig").dslName(text)) return ctx.fail(.invalid_connection, endpoint.span, "Generated key name is unrepresentable; declare explicit roles/keys");
             for (fields[0..ei]) |prior| if (std.mem.eql(u8, prior.name.text, text))
                 return ctx.fail(.invalid_connection, endpoint.span, "Generated connection key names collide; declare distinct roles/keys");
-            for (table.fields) |field| if (std.mem.eql(u8, field.name.text, text))
-                return ctx.fail(.unsupported_feature, field.name.span, "Explicit generated-key overrides are not yet supported");
             fields[ei] = .{ .name = .{ .text = text, .span = endpoint.span }, .type = .{ .name = endpoint.table, .span = endpoint.table.span }, .primary_key = true, .foreign_key = true, .span = marker };
+            for (table.fields) |field| {
+                if (!std.mem.eql(u8, field.name.text, text)) continue;
+                if (!field.foreign_key)
+                    return ctx.fail(.invalid_connection, field.name.span, "Generated key override must retain its stored foreign-key role");
+                if (!field.primary_key)
+                    return ctx.fail(.invalid_connection, field.name.span, "Generated key override must retain its primary-key role");
+                if (field.type.nullable)
+                    return ctx.fail(.invalid_connection, field.type.span, "Generated key override must be nonnullable");
+                if (!std.mem.eql(u8, field.type.name.text, endpoint.table.text))
+                    return ctx.fail(.invalid_connection, field.type.name.span, "Generated key override must target its exact DSL endpoint table");
+                for (field.directives) |directive| if (directive.kind == .allow_reuse)
+                    return ctx.fail(.invalid_connection, directive.span, "Generated key override cannot use #allow reuse");
+                // Preserve the authored metadata as a whole, in the generated slot.
+                // Its slices remain read-only and are owned by the source arena.
+                fields[ei] = field;
+            }
         }
-        @memcpy(fields[connection.endpoints.len..], table.fields);
-        table.fields = fields;
+        var length = connection.endpoints.len;
+        for (table.fields) |field| {
+            const overridden = for (fields[0..connection.endpoints.len]) |generated| {
+                if (std.mem.eql(u8, field.name.text, generated.name.text)) break true;
+            } else false;
+            if (overridden) continue;
+            fields[length] = field;
+            length += 1;
+        }
+        table.fields = fields[0..length];
     }
     return .{ .tables = tables };
 }

@@ -78,7 +78,15 @@ test "generated names preserve humps remove separators and lowercase only initia
 test "generated endpoint and override diagnostics retain real spans" {
     const Case = struct { body: []const u8, parents: []const u8 = "A {\n!id int\n}\nB {\n!id str\n}\n", category: resolver.Category = .invalid_connection, fragment: []const u8, message: []const u8 };
     const cases = [_]Case{
-        .{ .body = "~C(A, B) {\n~~\n*!aId A\n}\n", .category = .unsupported_feature, .fragment = "aId", .message = "overrides" },
+        .{ .body = "~C(A, B) {\n~~\n!aId int\n}\n", .fragment = "aId", .message = "foreign-key role" },
+        .{ .body = "~C(A, B) {\n~~\n*aId A\n}\n", .fragment = "aId", .message = "primary-key role" },
+        .{ .body = "~C(A, B) {\n~~\n*!aId A?\n}\n", .fragment = "A?", .message = "nonnullable" },
+        .{ .body = "~C(A, B) {\n~~\n*!aId B\n}\n", .fragment = "B", .message = "exact DSL endpoint" },
+        .{ .body = "~C(A, B) {\n~~\n*!aId int\n}\n", .fragment = "int", .message = "exact DSL endpoint" },
+        .{ .body = "~C(A, B) {\n~~\n*!aId a\n}\n", .fragment = "a", .message = "exact DSL endpoint" },
+        .{ .body = "~C(A, B) {\n~~\n*!aId A {\n#allow reuse\n}\n}\n", .fragment = "#allow reuse", .message = "cannot use" },
+        .{ .body = "~C(A, B) {\n*!aId A {\n#name `first`\n}\n~~\n*!aId A {\n#name `second`\n}\n}\n", .category = .duplicate_dsl_name, .fragment = "aId", .message = "duplicate DSL field" },
+        .{ .body = "~C(A, B) {\n~~\n*!extra A\n}\n", .fragment = "~C(A, B)", .message = "Connection requires" },
         .{ .body = "~C(A, B) {\nx int\n~~\nx int\n}\n", .category = .duplicate_dsl_name, .fragment = "x", .message = "duplicate DSL" },
         .{ .body = "~C(Role A, role B) {\n~~\n}\n", .parents = "A {\n!id int\n}\nB {\n!id int\n}\n", .fragment = "role B", .message = "names collide" },
         .{ .body = "~C(A, A) {\n~~\n}\n", .fragment = "A", .message = "unique roles" },

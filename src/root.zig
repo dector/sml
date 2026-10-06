@@ -28,6 +28,7 @@ test {
     _ = @import("connection_relationship_test.zig");
     _ = @import("connection_integration_test.zig");
     _ = @import("generated_connection_test.zig");
+    _ = @import("generated_override_test.zig");
     _ = @import("relationship_resolution_test.zig");
     _ = @import("relationship_integration_test.zig");
     _ = @import("foreign_key_resolution_test.zig");

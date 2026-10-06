@@ -208,8 +208,8 @@ receive ordinary indexes. Nested endpoints and unnamed connections remain deferr
 Named `~~` generation is supported end to end. It expands before field/type
 resolution without changing parsed source fields or documentation. Generated
 nonnullable PK FKs come first in **header order**, before all explicit payload
-fields, regardless of the marker's body position. They have no defaults or
-options; insert must supply every endpoint key. Each endpoint requires one
+fields, regardless of the marker's body position. Unmodified generated keys have
+no defaults or options; insert must supply those keys. Each endpoint requires one
 normal-table declared PK, including FK PK chains.
 
 DSL names are `camelCase(table-or-role DSL name) + PascalCase(PK DSL field name)`:
@@ -220,8 +220,27 @@ initial character changes case otherwise, preserving existing humps/acronyms
 (`URL` → `uRL`). All-underscore components and generated-name collisions are
 errors: declare distinct roles or explicit keys. Parent SQL `#name` aliases do
 not affect generated DSL names; ordinary SQL normalization remains unchanged.
-Explicit fields matching a generated name are rejected with an override-specific
-diagnostic. Generated-key overrides are the next slice; unnamed generation is later.
+An explicit field with the exact generated DSL name overrides that slot without
+moving it or adding a duplicate. For example:
+
+```pzl
+~Books(Author, Book) {
+  ~~
+  --- Custom writer column.
+  *!authorId Author {
+    #name `writer_id`
+    #onDelete cascade
+  }
+}
+```
+
+Overrides must remain nonnullable primary-key stored FKs targeting the exact DSL
+endpoint, and cannot use `#allow reuse`. Docs, SQL names, FK actions, valid
+inherited-type defaults, checks, uniqueness and indexes retain ordinary stored-FK
+semantics. Duplicate explicit DSL names are still errors. Other explicit fields
+follow all generated slots in source order; extra PKs fail connection validation.
+Repeated-table roles bind to their generated slots, including overrides. Unnamed
+generation remains deferred.
 
 Complete explicit-key example (forward mappings are allowed):
 
