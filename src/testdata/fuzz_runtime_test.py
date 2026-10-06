@@ -7,6 +7,7 @@ import argparse
 from contextlib import closing
 import json
 import random
+import re
 import sqlite3
 import subprocess
 import tempfile
@@ -138,6 +139,72 @@ def artifact(directory, seed, index, kind, source, stdout, stderr, status, reaso
     return path
 
 
+def report_failure(directory, seed, index, kind, source, stdout, stderr, status, reason):
+    # Report first: filesystem failures must never hide the original failure.
+    print(json.dumps(dict(failure=reason, seed=seed, index=index, kind=kind),
+                     ensure_ascii=True))
+    print(f'source={source!r}')
+    try:
+        path = artifact(directory, seed, index, kind, source, stdout, stderr,
+                        status, reason)
+    except OSError as exc:
+        print(json.dumps(dict(artifact_error=f'{type(exc).__name__}: {exc}'),
+                         ensure_ascii=True))
+    else:
+        if path is not None:
+            print(json.dumps(dict(artifact=str(path)), ensure_ascii=True))
+
+
+def validate_generated_sql(source, stdout):
+    # Read only fixed generator syntax, not arbitrary DSL. No RNG calls or case
+    # changes: each seed/index continues to produce exactly the same input bytes.
+    owner, item = [name.decode('utf-8') for name in re.findall(
+        rb'^  #name `((?:owner|item) [^`]+)`$', source, re.MULTILINE)]
+    connection = 'pair' if b'~Pair(' in source else (
+        'triple' if b'~Triple(' in source else None)
+    expected = {('main', owner, 'table', 2, 0, 1),
+                ('main', item, 'table', 10, 0, 1),
+                ('main', 'sqlite_sequence', 'table', 2, 0, 0),
+                ('main', 'sqlite_schema', 'table', 5, 0, 0),
+                ('temp', 'sqlite_temp_schema', 'table', 5, 0, 0)}
+    if connection:
+        expected.add(('main', connection, 'table', 3, 0, 1))
+    with closing(sqlite3.connect(':memory:')) as db:
+        db.execute('PRAGMA foreign_keys = ON')
+        db.executescript(stdout.decode('utf-8', errors='strict'))
+        actual = set(db.execute('PRAGMA table_list'))
+        if actual != expected:
+            raise ValueError(f'generated table_list mismatch: expected {sorted(expected)!r}, '
+                             f'got {sorted(actual)!r}')
+        # Parameterize table-valued PRAGMAs: generated names can contain quotes.
+        foreign_keys = list(db.execute('SELECT * FROM pragma_foreign_key_list(?)', (item,)))
+        if len(foreign_keys) != 1 or foreign_keys[0][2:5] != (owner, 'owner', 'id'):
+            raise ValueError('generated Item foreign key shape mismatch')
+        indexes = {row[0] for row in db.execute(
+            'SELECT name FROM sqlite_schema WHERE type = ? AND tbl_name = ?',
+            ('index', item))}
+        if indexes != {'owner lookup', 'range lookup', 'note unique'}:
+            raise ValueError('generated Item index names mismatch')
+
+
+def validate_result(kind, source, result):
+    """CLI output contract applies even when SQL is intentionally not decoded."""
+    if result.returncode not in (0, 1):
+        return f'unexpected compiler status {result.returncode}'
+    if result.returncode == 0 and result.stderr:
+        return 'successful compiler wrote stderr'
+    if result.returncode == 1:
+        if result.stdout:
+            return 'rejected compiler wrote stdout'
+        if not result.stderr:
+            return 'rejected compiler wrote no diagnostic'
+        if kind == 'generated-sql':
+            return 'known-valid generated DSL rejected'
+    elif kind == 'generated-sql':
+        validate_generated_sql(source, result.stdout)
+    return None
+
+
 def unsigned(value):
     if not value.isascii() or not value.isdecimal():
         raise argparse.ArgumentTypeError('expected an unsigned decimal integer')
@@ -168,20 +235,10 @@ def main():
             result = subprocess.run([str(args.compiler.resolve()), '--', '-'],
                                     input=source, capture_output=True, timeout=5)
             stdout, stderr, status = result.stdout, result.stderr, result.returncode
-            if status not in (0, 1):
-                reason = f'unexpected compiler status {status}'
-            elif kind == 'generated-sql':
-                if status != 0:
-                    reason = 'known-valid generated DSL rejected'
-                elif stderr:
-                    reason = 'successful compiler wrote stderr'
-                else:
-                    sql = stdout.decode('utf-8', errors='strict')
-                    with closing(sqlite3.connect(':memory:')) as db:
-                        db.execute('PRAGMA foreign_keys = ON')
-                        db.executescript(sql)
-                    stats['sql_executed'] += 1
-            else:
+            reason = validate_result(kind, source, result)
+            if reason is None and kind == 'generated-sql':
+                stats['sql_executed'] += 1
+            elif reason is None:
                 stats['status_only'] += 1
                 stats['rejected'] += int(status == 1)
                 if status == 0:
@@ -197,17 +254,11 @@ def main():
         except subprocess.TimeoutExpired as exc:
             stdout, stderr = exc.stdout or b'', exc.stderr or b''
             reason = 'compiler timed out after 5 seconds'
-        except (UnicodeDecodeError, sqlite3.Error, OSError) as exc:
+        except (ValueError, sqlite3.Error, OSError) as exc:
             reason = f'{type(exc).__name__}: {exc}'
         if reason:
-            path = artifact(args.failure_dir, args.seed, index, kind, source,
-                            stdout, stderr, status, reason)
-            # repr/json keep all source/control bytes out of terminal output.
-            print(json.dumps(dict(failure=reason, seed=args.seed, index=index,
-                                  kind=kind, artifact=str(path) if path else None),
-                             ensure_ascii=True))
-            if path is None:
-                print(f'source={source!r}')
+            report_failure(args.failure_dir, args.seed, index, kind, source,
+                           stdout, stderr, status, reason)
             return 1
     print(json.dumps(dict(seed=args.seed, iterations=args.iterations, **stats,
                           non_utf8_sample_indices=samples), ensure_ascii=True))

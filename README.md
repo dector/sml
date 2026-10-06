@@ -559,11 +559,16 @@ This separate Python stdlib harness defaults to **500** cases, with a **5-second
 per-compiler-call timeout**. It does not build, modify fixtures, or invoke the Zig
 fuzz campaign. It sends exact bytes to the real CLI using `-- -` and accepts only
 exit statuses 0 (compiled) or 1 (diagnostic); crashes, timeouts and status 2 fail.
+Every case enforces the CLI output contract: status 0 requires empty stderr;
+status 1 requires empty stdout and a nonempty stderr diagnostic.
 Half the cases generate known-valid DSL without trusted raw SQL. Those must
 compile, decode as strict UTF-8, and execute their PRAGMA/DDL in a fresh SQLite
-in-memory database. Generation varies typed expressions, defaults, checks,
-indexes, named constraints, enums, dates, FKs, backrefs and generated connections.
-It executes no inserts or runtime queries, so it is not a data-semantics oracle.
+in-memory database. `PRAGMA table_list` must exactly match the generated schema
+(including table names, column counts and strictness), with the expected Item FK
+and index names. Empty SQL or an unrelated schema fails. Generation varies typed
+expressions, defaults, checks, indexes, named constraints, enums, dates, FKs,
+backrefs and generated connections. It queries schema metadata only, with no
+inserts or data queries, so it is not a data-semantics oracle.
 
 Other cases mutate sorted parser fixtures, arbitrary bytes, or generated literal,
 name and comment boundaries, including NUL, controls and malformed UTF-8. These
@@ -575,11 +580,12 @@ bytes `b'--- \xff\nA {\n  n int\n}\n'`: compilation succeeds and the emitted SQL
 comment contains byte `0xff`. Strict UTF-8 decoding therefore fails before SQLite
 can execute it. No production-policy change or replacement-decoding is implied.
 
-Failures print escaped metadata (and `repr` input when no artifact directory is
-requested). With `--failure-dir`, each failure creates an exclusive directory
+Failures always print escaped metadata and exact `repr` input before attempting
+artifact writes. With `--failure-dir`, each failure creates an exclusive directory
 containing exact `source.pzl`, `stdout.bin`, `stderr.bin` and seed/index/status
-metadata; existing artifacts are never overwritten. No files are written on
-success. To replay an index, rerun with the same seed, compiler, harness and
+metadata; existing artifacts are never overwritten. Filesystem errors print an
+escaped artifact error without masking the original failure or its seed/index
+and source bytes. No files are written on success. To replay an index, rerun with the same seed, compiler, harness and
 fixture revisions, and at least `index + 1` iterations. This is deterministic
 mutation/generation fuzzing, **not coverage-guided fuzzing**.
 
