@@ -1108,9 +1108,15 @@ Profile {
 }
 ```
 
-A unique stored FK ensures at most one author references a given profile. A
-singular backref requires its source FK to be unique or a primary key; otherwise
-compilation fails.
+Implemented in VirtualRelationships Slice3. A unique stored FK ensures at most
+one author references a given profile. A singular backref requires a single-column
+PK, field UNIQUE, one-column table UNIQUE, or full unique index on exactly that
+FK column. Composite keys/constraints/indexes and partial unique indexes never
+prove this (even a constant true predicate). Otherwise compilation fails.
+Nullable backing FKs are allowed: distinct NULLs do not reference any profile.
+Direct collections require no uniqueness proof. All public resolved relationship
+metadata is preflighted before any SQL writes; relationships emit no SQL.
+Documentation output placement remains undecided.
 
 Singular backrefs must be nullable in v1. A required forward FK guarantees every
 referencing row has a target, but does not guarantee every target has a referring

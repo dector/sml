@@ -7,7 +7,7 @@ const writeBlob = sql_writer.writeBlob;
 const resolved = @import("model/resolved.zig");
 const expression_emitter = @import("expression_emitter.zig");
 
-pub const Error = expression_emitter.Error || error{ NullablePrimaryKey, InvalidPrimaryKey, InvalidIdReuse, InvalidDefault, InvalidEnum, DefaultOnAutoPrimaryKey, InvalidCheck, InvalidUnique, InvalidIndex, SqlNameCollision, InvalidForeignKey };
+pub const Error = expression_emitter.Error || error{ NullablePrimaryKey, InvalidPrimaryKey, InvalidIdReuse, InvalidDefault, InvalidEnum, DefaultOnAutoPrimaryKey, InvalidCheck, InvalidUnique, InvalidIndex, SqlNameCollision, InvalidForeignKey, InvalidRelationship };
 
 /// Emit tables and columns in schema order, then ordered table CHECK items.
 /// Zero-column tables (even checks-only tables) remain non-executable skeletons.
@@ -20,6 +20,7 @@ pub const Error = expression_emitter.Error || error{ NullablePrimaryKey, Invalid
 /// and not syntax-validated, including direct resolved enum raw-SQL defaults.
 /// Writer failures may leave partial output. The caller owns and flushes the writer.
 pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
+    try preflightRelationships(schema);
     for (schema.tables, 0..) |table, table_index| {
         for (schema.tables[0..table_index]) |prior| {
             if (std.ascii.eqlIgnoreCase(table.sql_name, prior.sql_name)) return error.SqlNameCollision;
@@ -246,6 +247,34 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
         }
         try writer.writeAll(";\n");
     };
+}
+
+/// Validate all virtual metadata before any SQL is written.
+fn preflightRelationships(schema: resolved.Schema) Error!void {
+    for (schema.relationships, 0..) |r, n| {
+        if (!@import("unique.zig").dslName(r.dsl_name) or
+            r.owner_table_index >= schema.tables.len or r.target_table_index >= schema.tables.len or
+            r.source_table_index >= schema.tables.len or r.source_table_index != r.target_table_index)
+            return error.InvalidRelationship;
+        const owner = schema.tables[r.owner_table_index];
+        const source = schema.tables[r.source_table_index];
+        if (r.backing_column_index >= source.columns.len) return error.InvalidRelationship;
+        for (owner.columns) |c| if (std.mem.eql(u8, c.dsl_name, r.dsl_name)) return error.InvalidRelationship;
+        for (schema.relationships[0..n]) |prior| {
+            if (prior.owner_table_index == r.owner_table_index and std.mem.eql(u8, prior.dsl_name, r.dsl_name)) return error.InvalidRelationship;
+        }
+        if (primaryKeyCount(owner) != 1) return error.InvalidRelationship;
+        const key = for (owner.columns) |c| {
+            if (c.primary_key != .none) break c;
+        } else return error.InvalidRelationship;
+        const column = source.columns[r.backing_column_index];
+        const fk = column.foreign_key orelse return error.InvalidRelationship;
+        if (!std.ascii.eqlIgnoreCase(fk.target_table_sql_name, owner.sql_name) or
+            !std.ascii.eqlIgnoreCase(fk.target_column_sql_name, key.sql_name) or key.nullable)
+            return error.InvalidRelationship;
+        validateForeignKey(schema, column, fk) catch return error.InvalidRelationship;
+        if (r.cardinality == .optional_one and !@import("unique.zig").singleColumn(source, r.backing_column_index)) return error.InvalidRelationship;
+    }
 }
 
 fn validateForeignKey(schema: resolved.Schema, column: resolved.Column, fk: resolved.ForeignKey) Error!void {
@@ -494,12 +523,12 @@ test "SQL identifiers preserve spelling and escape quotes" {
     );
 }
 
-test "virtual relationships produce no SQL" {
+test "invalid public relationship indices produce no SQL" {
     var output = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer output.deinit();
 
-    try emit(.{ .relationships = &.{.{ .dsl_name = "books", .owner_table_index = 0, .target_table_index = 1, .source_table_index = 1, .backing_column_index = 0, .cardinality = .many }} }, &output.writer);
-    try std.testing.expectEqualStrings(@embedFile("testdata/emitter/empty_schema.expect.sql"), output.written());
+    try std.testing.expectError(error.InvalidRelationship, emit(.{ .relationships = &.{.{ .dsl_name = "books", .owner_table_index = 0, .target_table_index = 1, .source_table_index = 1, .backing_column_index = 0, .cardinality = .many }} }, &output.writer));
+    try std.testing.expectEqualStrings("", output.written());
 }
 
 test "columns emit every storage type with nullability and commas" {

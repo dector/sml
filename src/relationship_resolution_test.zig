@@ -4,6 +4,151 @@ const parsed = @import("model/parsed.zig");
 const resolver = @import("resolver.zig");
 const emitter = @import("emitter.zig");
 
+const resolved = @import("model/resolved.zig");
+
+test "singular relationship runtime fixture contains only stored enforcement SQL" {
+    var syntax = try parser.parse(std.testing.allocator, @embedFile("testdata/parser/singular_relationships.pzl"));
+    defer syntax.schema.deinit();
+    var result = try resolver.resolve(std.testing.allocator, syntax.schema.schema);
+    defer result.schema.deinit();
+    var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer output.deinit();
+    try emitter.emit(result.schema.schema, &output.writer);
+    try std.testing.expectEqualStrings(@embedFile("testdata/parser/singular_relationships.expect.sql"), output.written());
+}
+
+const singular_source =
+    "Parent {\n #name `Owners`\n !id enum {\n #of alpha, beta\n }\n --- Singular docs\n ~profile Child? @Child.parent\n}\n" ++
+    "Child {\n #name `Profiles`\n *!parent Parent\n}\n" ++
+    "Node {\n !id int\n ~next Node? @Node.parent\n *parent Node? {\n ? unique\n }\n}\n";
+
+fn singularOwned(allocator: std.mem.Allocator) !void {
+    const buffer = try allocator.dupe(u8, singular_source);
+    var syntax = parser.parse(allocator, buffer) catch |err| {
+        allocator.free(buffer);
+        return err;
+    };
+    if (syntax != .schema) {
+        allocator.free(buffer);
+        return error.ExpectedSchema;
+    }
+    var result = resolver.resolve(allocator, syntax.schema.schema) catch |err| {
+        syntax.schema.deinit();
+        allocator.free(buffer);
+        return err;
+    };
+    syntax.schema.deinit();
+    allocator.free(buffer);
+    try std.testing.expect(result == .schema);
+    defer result.schema.deinit();
+    try std.testing.expectEqual(.optional_one, result.schema.schema.relationships[0].cardinality);
+    try std.testing.expectEqualStrings("Singular docs", result.schema.schema.relationships[0].documentation.?.text);
+    try std.testing.expectEqual(.enumeration, result.schema.schema.tables[1].columns[0].type);
+    var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer output.deinit();
+    try emitter.emit(result.schema.schema, &output.writer);
+}
+
+test "singular forward shared enum identity and nullable unique self FK own metadata under OOM" {
+    try singularOwned(std.testing.allocator);
+    var backing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .resize_fail_index = 0 });
+    try std.testing.checkAllAllocationFailures(backing.allocator(), singularOwned, .{});
+}
+
+fn singularInvalid(allocator: std.mem.Allocator) !void {
+    var syntax = try parser.parse(allocator, "Parent {\n !id int\n --- Unsupported proof\n ~profile Child? @Child.parent\n}\nChild {\n *parent Parent?\n #index parent {\n #name `partial`\n #unique\n #where true\n }\n}\n");
+    defer syntax.schema.deinit();
+    const result = try resolver.resolve(allocator, syntax.schema.schema);
+    try std.testing.expect(result == .diagnostic);
+    try std.testing.expectEqual(.invalid_relationship_mapping, result.diagnostic.category);
+}
+
+test "singular invalid partial proof diagnostic cleans all partial arenas under OOM" {
+    var backing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .resize_fail_index = 0 });
+    try std.testing.checkAllAllocationFailures(backing.allocator(), singularInvalid, .{});
+}
+
+test "singular requires exactly one globally unique backing column" {
+    const Case = struct { field: []const u8, extra: []const u8 = "", good: bool };
+    const cases = [_]Case{
+        .{ .field = "*parent Parent? {\n ? unique\n }", .good = true },
+        .{ .field = "*parent Parent?", .extra = "?? unique(parent)", .good = true },
+        .{ .field = "*parent Parent? {\n #index {\n #unique\n }\n }", .good = true },
+        .{ .field = "*parent Parent?", .extra = "#index parent {\n #unique\n }", .good = true },
+        .{ .field = "*!parent Parent", .good = true },
+        .{ .field = "*parent Parent?", .good = false },
+        .{ .field = "*!parent Parent\n !other int", .good = false },
+        .{ .field = "*parent Parent?\n other int", .extra = "?? unique(parent, other)", .good = false },
+        .{ .field = "*parent Parent?\n other int", .extra = "#index parent, other {\n #unique\n }", .good = false },
+        .{ .field = "*parent Parent?", .extra = "#index parent {\n #unique\n #name `partial_parent`\n #where true\n }", .good = false },
+    };
+    for (cases) |case| {
+        const text = try std.fmt.allocPrint(std.testing.allocator, "Parent {{\n !id int\n ~profile Child? @Child.parent\n}}\nChild {{\n {s}\n {s}\n}}\n", .{ case.field, case.extra });
+        defer std.testing.allocator.free(text);
+        var syntax = try parser.parse(std.testing.allocator, text);
+        try std.testing.expect(syntax == .schema);
+        defer syntax.schema.deinit();
+        var result = try resolver.resolve(std.testing.allocator, syntax.schema.schema);
+        if (case.good) {
+            try std.testing.expect(result == .schema);
+            defer result.schema.deinit();
+            var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+            defer output.deinit();
+            try emitter.emit(result.schema.schema, &output.writer);
+            var stored = result.schema.schema;
+            stored.relationships = &.{};
+            var plain: std.Io.Writer.Allocating = .init(std.testing.allocator);
+            defer plain.deinit();
+            try emitter.emit(stored, &plain.writer);
+            try std.testing.expectEqualStrings(plain.written(), output.written());
+        } else {
+            try std.testing.expect(result == .diagnostic);
+            try std.testing.expectEqual(.invalid_relationship_mapping, result.diagnostic.category);
+        }
+    }
+}
+
+test "public relationship preflight checks complete metadata before writes" {
+    var syntax = try parser.parse(std.testing.allocator, singular_source);
+    defer syntax.schema.deinit();
+    var result = try resolver.resolve(std.testing.allocator, syntax.schema.schema);
+    defer result.schema.deinit();
+    const original = result.schema.schema.relationships[0];
+    var variants: [12]resolved.Relationship = undefined;
+    @memset(&variants, original);
+    variants[0].owner_table_index = 99;
+    variants[1].target_table_index = 99;
+    variants[2].source_table_index = 99;
+    variants[3].backing_column_index = 99;
+    variants[4].source_table_index = 2;
+    variants[5].owner_table_index = 2;
+    variants[6].dsl_name = "";
+    variants[7].dsl_name = "bad-name";
+    variants[8].dsl_name = "id";
+    variants[9].dsl_name = "true";
+    variants[10].dsl_name = "a\x00b";
+    variants[11].dsl_name = "1bad";
+    for (variants) |bad| {
+        var schema = result.schema.schema;
+        // A valid earlier relation must not cause any output before the bad one.
+        schema.relationships = &.{ original, bad };
+        var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+        defer output.deinit();
+        try std.testing.expectError(error.InvalidRelationship, emitter.emit(schema, &output.writer));
+        try std.testing.expectEqualStrings("", output.written());
+    }
+    var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer output.deinit();
+    var schema = result.schema.schema;
+    schema.relationships = &.{ original, original };
+    try std.testing.expectError(error.InvalidRelationship, emitter.emit(schema, &output.writer));
+    const columns = @constCast(schema.tables[1].columns);
+    columns[0].primary_key = .none;
+    schema.relationships = &.{original};
+    try std.testing.expectError(error.InvalidRelationship, emitter.emit(schema, &output.writer));
+    try std.testing.expectEqualStrings("", output.written());
+}
+
 const source =
     "Parent {\n" ++
     "  #name `Owners`\n" ++
@@ -104,8 +249,8 @@ test "relationship failures identify exact authored tokens and declaration spans
         .{ .declaration = "~kids Child[] @items.parent", .category = .unknown_relationship_source, .token = "items" },
         .{ .declaration = "~kids Child[] @Child.owner_key", .category = .unknown_relationship_field, .token = "owner_key" },
         .{ .declaration = "~id Child[] @Child.parent", .category = .duplicate_dsl_name, .token = "id" },
-        .{ .declaration = "~kids Child? @Child.parent", .category = .unsupported_feature, .token = "~kids Child? @Child.parent" },
-        .{ .declaration = "~kids Child @Child.parent", .category = .unsupported_feature, .token = "~kids Child @Child.parent" },
+        .{ .declaration = "~kids Child? @Child.parent", .category = .invalid_relationship_mapping, .token = "parent" },
+        .{ .declaration = "~kids Child @Child.parent", .category = .invalid_relationship_mapping, .token = "Child" },
         .{ .declaration = "~kids Child[] @Child.wrong", .category = .invalid_relationship_owner, .token = "~kids Child[] @Child.wrong", .owner_key = "value int" },
         .{ .declaration = "~kids Child[] @Child.wrong", .category = .invalid_relationship_owner, .token = "~kids Child[] @Child.wrong", .owner_key = "!id int\n !second int" },
     };

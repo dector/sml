@@ -452,10 +452,12 @@ const Context = struct {
                     if (std.mem.eql(u8, prior.name.text, relationship.name.text))
                         return self.fail(.duplicate_dsl_name, relationship.name.span, "duplicate DSL relationship name");
                 }
-                if (!relationship.collection)
-                    return self.fail(.unsupported_feature, relationship.span, "Singular relationships are unsupported until uniqueness validation is implemented");
-                if (relationship.target.nullable)
+                if (!@import("unique.zig").dslName(relationship.name.text))
+                    return self.fail(.invalid_identifier, relationship.name.span, "Invalid DSL relationship name");
+                if (relationship.collection and relationship.target.nullable)
                     return self.fail(.invalid_relationship_mapping, relationship.target.span, "Relationship collections cannot be nullable");
+                if (!relationship.collection and !relationship.target.nullable)
+                    return self.fail(.invalid_relationship_mapping, relationship.target.span, "Singular relationships must be nullable");
                 const target = for (tables, 0..) |candidate, ti| {
                     if (std.mem.eql(u8, candidate.dsl_name, relationship.target.name.text)) break ti;
                 } else return self.fail(.unknown_relationship_target, relationship.target.name.span, "Unknown DSL table in relationship target");
@@ -480,13 +482,15 @@ const Context = struct {
                 if (!std.mem.eql(u8, fk.target_table_sql_name, tables[owner].sql_name) or
                     !std.mem.eql(u8, fk.target_column_sql_name, tables[owner].columns[key].sql_name))
                     return self.fail(.invalid_relationship_mapping, relationship.source_field.span, "Relationship source foreign key must reference the owner's single primary key");
+                if (!relationship.collection and !@import("unique.zig").singleColumn(tables[source], backing))
+                    return self.fail(.invalid_relationship_mapping, relationship.source_field.span, "Singular relationship backing FK must be unique as a single column (not composite or partial)");
                 try output.append(self.allocator, .{
                     .dsl_name = try self.allocator.dupe(u8, relationship.name.text),
                     .owner_table_index = owner,
                     .target_table_index = target,
                     .source_table_index = source,
                     .backing_column_index = backing,
-                    .cardinality = .many,
+                    .cardinality = if (relationship.collection) .many else .optional_one,
                     .documentation = try self.documentation(relationship.documentation),
                     .span = relationship.span,
                 });
