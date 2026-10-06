@@ -1,5 +1,5 @@
 //! Resolver-owned expansion. Source fields/docs stay untouched; generated keys
-//! precede explicit payload in header order (canonical order for unnamed pairs),
+//! precede explicit payload in header order (canonical table/role order for unnamed),
 //! regardless of the marker slot.
 const std = @import("std");
 const parsed = @import("model/parsed.zig");
@@ -31,18 +31,15 @@ pub fn expand(ctx: anytype, source: parsed.Schema) @TypeOf(ctx.*).Error!parsed.S
     for (tables, 0..) |*table, ti| {
         const connection = table.connection orelse continue;
         if (!connection.unnamed) continue;
-        if (connection.endpoints.len != 2 or connection.endpoints[0].role != null or connection.endpoints[1].role != null)
-            return ctx.fail(.unsupported_feature, connection.span, "Unnamed connections support exactly two distinct unroled endpoints");
-        const identity = @import("connection_identity.zig").canonicalKey(connection.endpoints[0].table.text, connection.endpoints[1].table.text) catch
-            return ctx.fail(.unsupported_feature, connection.span, "Unnamed connections support exactly two distinct unroled endpoints");
+        const identity = try @import("connection_identity.zig").fromEndpoints(ctx.allocator, connection.endpoints);
         for (tables[0..ti]) |prior| {
             const other = prior.connection orelse continue;
             if (!other.unnamed) continue;
-            const key = @import("connection_identity.zig").canonicalKey(other.endpoints[0].table.text, other.endpoints[1].table.text) catch unreachable;
+            const key = try @import("connection_identity.zig").fromEndpoints(ctx.allocator, other.endpoints);
             if (identity.eql(key)) return ctx.fail(.duplicate_dsl_name, connection.span, "Duplicate unnamed connection identity");
         }
         const endpoints = try ctx.allocator.dupe(parsed.Endpoint, connection.endpoints);
-        if (!std.mem.eql(u8, endpoints[0].table.text, identity.endpoints[0])) std.mem.swap(parsed.Endpoint, &endpoints[0], &endpoints[1]);
+        std.mem.sort(parsed.Endpoint, endpoints, {}, @import("connection_identity.zig").endpointLess);
         table.connection.?.endpoints = endpoints;
         table.name.text = try identity.declarationName(ctx.allocator);
         table.name.span = connection.span;

@@ -94,7 +94,7 @@ test "explicit unnamed wins even later with authored arbitrary keys and unique s
 
 test "implicit diagnostics reject self nested missing keys fields hints singular and collisions" {
     const cases = [_][2][]const u8{
-        .{ "A {\n!id int\n~a A[] @.aId\n}\n", "distinct normal tables" },
+        .{ "A {\n!id int\n~a A[] @.aId\n}\n", "explicit unnamed connection" },
         .{ "A {\n!id int\n~b B[] @.aId\n}\n", "Unknown implicit" },
         .{ "A {\n!id int\n~b B[] @.aId\n}\nB {\n!x int\n!y int\n}\n", "exactly one" },
         .{ "A {\n!id int\n~b B[] @.missing\n}\nB {\n!id int\n}\n", "Unknown stored DSL field" },

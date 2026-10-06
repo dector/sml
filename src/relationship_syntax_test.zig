@@ -80,7 +80,6 @@ test "direct relationships preserve names cardinality full spans docs and separa
 test "relationship mapping and options have explicit diagnostics" {
     const cases = [_][2][]const u8{
         .{ "T {\n  ~books Book[]\n}\n", "require an @Table.field" },
-        .{ "~(left A, B) {}", "Unnamed connections support" },
         .{ "T {\n  ~books Book[]? @Book.owner\n}", "cannot be nullable" },
         .{ "T {\n  books Book[]\n}", "Stored arrays" },
         .{ "T {\n  ~books Book[] (null) @Book.owner\n}", "cannot have defaults" },

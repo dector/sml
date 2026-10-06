@@ -6,16 +6,18 @@ const identity = @import("connection_identity.zig");
 const Pending = struct { key: identity.Identity, span: parsed.Span };
 
 fn less(_: void, a: Pending, b: Pending) bool {
-    const order = std.mem.order(u8, a.key.endpoints[0], b.key.endpoints[0]);
-    return order == .lt or (order == .eq and std.mem.order(u8, a.key.endpoints[1], b.key.endpoints[1]) == .lt);
+    return a.key.order(b.key) == .lt;
 }
 
 fn find(tables: []const parsed.Table, key: identity.Identity) ?usize {
     for (tables, 0..) |table, i| {
         const connection = table.connection orelse continue;
         if (!connection.unnamed) continue;
-        const other = identity.canonicalKey(connection.endpoints[0].table.text, connection.endpoints[1].table.text) catch continue;
-        if (key.eql(other)) return i;
+        if (connection.endpoints.len != 2) continue;
+        const a = connection.endpoints[0].table.text;
+        const b = connection.endpoints[1].table.text;
+        if ((std.mem.eql(u8, key.endpoints[0], a) and std.mem.eql(u8, key.endpoints[1], b)) or
+            (std.mem.eql(u8, key.endpoints[0], b) and std.mem.eql(u8, key.endpoints[1], a))) return i;
     }
     return null;
 }
@@ -26,8 +28,7 @@ pub fn expand(ctx: anytype, input: []parsed.Table) @TypeOf(ctx.*).Error![]parsed
         if (!r.source_implicit) continue;
         if (r.source_table.text.len != 0)
             return ctx.fail(.invalid_relationship_mapping, r.source_table.span, "Implicit source table must be empty");
-        const key = identity.canonicalKey(owner.name.text, r.target.name.text) catch
-            return ctx.fail(.unsupported_feature, r.source_field.span, "Implicit connections require two distinct normal tables; use a named connection for self relationships");
+        const key = try identity.canonicalKey(ctx.allocator, &.{ owner.name.text, r.target.name.text });
         for (key.endpoints) |name| {
             const parent = for (input) |candidate| {
                 if (std.mem.eql(u8, candidate.name.text, name)) break candidate;
@@ -42,6 +43,8 @@ pub fn expand(ctx: anytype, input: []parsed.Table) @TypeOf(ctx.*).Error![]parsed
                 return ctx.fail(.invalid_connection, r.source_field.span, "Implicit connection endpoint requires exactly one declared primary key");
         }
         if (find(input, key) != null) continue;
+        if (std.mem.eql(u8, key.endpoints[0], key.endpoints[1]))
+            return ctx.fail(.invalid_connection, r.source_field.span, "Implicit self relationships require an explicit unnamed connection with distinct roles");
         const exists = for (pending.items) |prior| {
             if (key.eql(prior.key)) break true;
         } else false;
@@ -72,7 +75,7 @@ pub fn expand(ctx: anytype, input: []parsed.Table) @TypeOf(ctx.*).Error![]parsed
         const relationships = try ctx.allocator.dupe(parsed.Relationship, table.relationships);
         for (relationships) |*r| {
             if (!r.source_implicit) continue;
-            const key = identity.canonicalKey(table.name.text, r.target.name.text) catch unreachable;
+            const key = try identity.canonicalKey(ctx.allocator, &.{ table.name.text, r.target.name.text });
             const index = find(tables, key) orelse unreachable;
             r.source_table = tables[index].name;
             r.source_implicit = false;

@@ -139,7 +139,7 @@ test "emitter rejects noncanonical and duplicate unnamed public metadata before 
     std.mem.swap(resolved.Endpoint, &endpoints[0], &endpoints[1]);
     try std.testing.expectError(error.InvalidConnection, emitter.emit(.{ .tables = tables }, &out.writer));
     std.mem.swap(resolved.Endpoint, &endpoints[0], &endpoints[1]);
-    endpoints[0].role = "writer";
+    endpoints[0].role = "";
     try std.testing.expectError(error.InvalidConnection, emitter.emit(.{ .tables = tables }, &out.writer));
     endpoints[0].role = null;
     const identity = tables[0].connection.?.identity;

@@ -205,9 +205,9 @@ const Context = struct {
             const opts = try self.options(table.directives, true);
             const sql_name = if (table.connection != null and table.connection.?.unnamed and opts.name == null) blk: {
                 const endpoints = table.connection.?.endpoints;
-                const left = try self.name(endpoints[0].table, null);
-                const right = try self.name(endpoints[1].table, null);
-                break :blk try std.fmt.allocPrint(self.allocator, "{s}__n__{s}", .{ left, right });
+                const components = try self.allocator.alloc([]const u8, endpoints.len);
+                for (endpoints, 0..) |endpoint, ei| components[ei] = try self.name(endpoint.table, null);
+                break :blk try std.mem.join(self.allocator, "__n__", components);
             } else try self.name(table.name, opts.name);
             for (tables[0..i]) |previous| {
                 if (std.ascii.eqlIgnoreCase(previous.sql_name, sql_name))
@@ -465,10 +465,7 @@ const Context = struct {
             }
             tables[ti].connection = .{
                 .unnamed = connection.unnamed,
-                .identity = if (connection.unnamed) @import("connection_identity.zig").Identity{ .endpoints = .{
-                    tables[endpoints[0].table_index].dsl_name,
-                    tables[endpoints[1].table_index].dsl_name,
-                } } else null,
+                .identity = if (connection.unnamed) try @import("connection_identity.zig").fromEndpoints(self.allocator, connection.endpoints) else null,
                 .endpoints = endpoints,
             };
         }

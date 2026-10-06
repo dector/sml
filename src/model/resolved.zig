@@ -36,7 +36,7 @@ pub const Connection = struct {
 pub const Endpoint = struct {
     table_index: usize,
     role: ?[]const u8 = null,
-    /// Generated endpoints bind header-ordered keys (canonical for unnamed pairs).
+    /// Generated endpoints bind header-ordered keys (canonical table/role order for unnamed).
     /// Explicit unique-table endpoints bind their PK FK column; repeated-table
     /// explicit roles remain null (names/order do not imply bindings).
     /// Public schemas may supply valid distinct explicit bindings.

@@ -141,10 +141,7 @@ const Parser = struct {
         var connection: ?parsed.Connection = if (is_connection) try self.connectionHeader(start) else null;
         const table_name: parsed.Token = if (unnamed) blk: {
             const header = &connection.?;
-            if (header.endpoints.len != 2 or header.endpoints[0].role != null or header.endpoints[1].role != null)
-                return self.fail(header.span, "Unnamed connections support exactly two distinct unroled endpoints");
-            const identity = @import("connection_identity.zig").canonicalKey(header.endpoints[0].table.text, header.endpoints[1].table.text) catch
-                return self.fail(header.span, "Unnamed connections support exactly two distinct unroled endpoints");
+            const identity = try @import("connection_identity.zig").fromEndpoints(self.allocator, header.endpoints);
             header.unnamed = true;
             break :blk .{ .text = try identity.declarationName(self.allocator), .span = header.span };
         } else token(first.?);

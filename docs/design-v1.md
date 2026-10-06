@@ -23,11 +23,11 @@ design does not imply implemented syntax.
   actions, shared-PK identity, and automatic ordinary FK indexes are implemented
   (StoredFK Slice6). Direct backrefs and named explicit-key connections with
   virtual endpoint relationships are implemented. Named `~~` keys, generated
-  key overrides, and explicit/implicit distinct unroled unnamed pairs are implemented.
+  key overrides, extended explicit unnamed connections, and exact-pair shorthand are implemented.
 - Inline enums are implemented. Reusable types (including named enums) are
   deferred indefinitely; their examples below are design sketches, not supported syntax.
 - Named role/self/multi-endpoint connections support explicit and generated keys.
-  Unnamed roles/self/multi-endpoint connections and nested endpoints are unsupported.
+  Unnamed roles/self/multi-endpoint connections are implemented; nested endpoints remain deferred.
 - Current types: `int`, `real`, `str`, `blob`, `bool`, `date`, `datetime`, inline `enum`.
   Expressions, field/table checks, named native UNIQUE constraints, ordinary/unique/
   partial indexes, and FK/backref resolution are implemented.
@@ -983,8 +983,8 @@ non-FK scope are diagnosed. setNull requires local nullability, also enforced by
 emitter preflight before writing output. `#onUpdate` is unsupported. Automatic
 FK indexes are implemented in StoredFK Slice6, including named explicit-key
 connection tables. Direct backrefs and named connection mappings are implemented;
-distinct unroled unnamed connections and generated keys are implemented; nested
-endpoints and unnamed self/role/multi-endpoint connections remain future design.
+extended unnamed connections and generated keys are implemented; nested
+endpoints remain deferred.
 
 ```text
 Book {
@@ -1151,8 +1151,12 @@ no SQL column to name, index, or constrain.
 
 ### Implicit unnamed connections
 
-**Implemented scope:** `@.field` supports exactly two distinct, unroled existing
-normal tables with one declared PK each. Lookup uses canonical exact DSL identity,
+**Implemented scope:** `@.field` matches exact two-endpoint identities of existing
+normal tables with one declared PK each, including explicit role/self pairs.
+Only distinct-table pairs get automatic generation; absent explicit self pairs
+are diagnosed rather than assigned guessed roles. Multi-endpoint connections
+are never selected by pair containment or implicitly guessed.
+Lookup uses canonical exact DSL identity,
 not SQL aliases or synthesized names. Explicit unnamed declarations win even
 when later in source; their keys/options are reused unchanged, with no automatic
 prefill. Missing authored source fields are errors. Otherwise one generated table
@@ -1160,8 +1164,8 @@ per pair appends after authored tables in globally sorted canonical identity ord
 Expansion uses private resolver-arena arrays, leaving parsed input untouched.
 Optional destination hints validate normally. Generated source keys are not unique
 alone, so nullable singular mappings need an explicit unique source key.
-Named connections on the same pair remain separate. Unknown/composite endpoints,
-unnamed self/roles/multi-endpoints and nested endpoints are unsupported. Virtual
+Named connections on the same pair remain separate. Unknown/composite endpoints
+and nested endpoints are unsupported. Virtual
 relationships and their docs emit no SQL or queries.
 
 ```text
@@ -1206,7 +1210,7 @@ these components.
 
 The implemented component helper removes underscores and uppercases the next
 byte, changing only the initial byte otherwise (`URL` → `uRL`). Generated named
-keys follow header order; distinct unroled unnamed keys follow canonical DSL
+keys follow header order; unnamed keys follow canonical DSL table/role
 endpoint order. SQL normalization remains separate.
 
 ### Explicit unnamed declaration
@@ -1263,8 +1267,8 @@ or ID generation. Payload defaults/checks/uniqueness
 and FK deletion actions work exactly as in ordinary tables. The first PK column
 covers its FK lookup; other uncovered FKs receive ordinary indexes.
 Nested endpoints remain deferred. Named generated keys and same-DSL-name overrides
-are implemented, as are explicit/implicit unnamed distinct unroled pairs. Unnamed
-self/role/multi-endpoint examples below remain future design.
+are implemented, as are explicit unnamed role/self/multi-endpoint connections
+and exact-pair shorthand. Nested endpoints remain deferred.
 
 ```text
 Author {
@@ -1319,6 +1323,12 @@ location does not move the generated field.
 
 ### Identity and ordering
 
+Unnamed identity is the sorted exact DSL table-name **multiset**, retaining
+repeats and excluding roles and SQL aliases. Two and three occurrences of a table
+are distinct identities; differing role labels alone never distinguish identities.
+Synthesized DSL names join sorted components with `__n__`; default SQL names
+normalize each DSL component separately and join with `__n__`. Parent `#name`
+does not affect either name. Connection `#name` changes SQL naming only.
 Unnamed connection identity is order-independent:
 
 ```text
@@ -1331,7 +1341,7 @@ a duplicate-definition error. Use deterministic naming such as
 `author__n__book`. Named connections are distinct by their declared names.
 
 Connection identity being order-independent does not make composite index order
-irrelevant. The agreed future generated-key ordering rules are:
+irrelevant. The implemented generated-key ordering rules are:
 
 - Named connections generate endpoint fields in **header endpoint order**.
 - Unnamed connections generate endpoint fields in canonical ascending order of
@@ -1346,10 +1356,9 @@ keys instead retain authored field order, as currently implemented: their first
 written PK field remains first regardless of header or canonical endpoint order.
 An explicit override of a generated field keeps its generated slot; it does not
 switch that field to authored-key ordering. These rules are implemented for
-named connections and distinct unroled unnamed pairs. Unnamed role/tie ordering
-remains future design.
+named and unnamed connections, including roles and repeated tables.
 
-### Role names (implemented for named connections)
+### Role names (implemented for named and unnamed connections)
 
 Roles customize generated DSL key names in named connections:
 
@@ -2263,9 +2272,9 @@ These are not new agreed requirements; they are gaps worth resolving explicitly.
    hash-delimited backticks are settled.
 2. Generated trigger and expanded nulls-equal object naming. Ordinary/unique/
    partial/FK index names and collision diagnostics are implemented (section 17).
-3. Future unnamed role/tie rules. Generated key casing (including acronyms and
-   underscores) and order for named connections and distinct unroled unnamed
-   pairs are implemented (section 14).
+3. Generated key casing (including acronyms and underscores) and table/role
+   ordering for named and extended unnamed connections are settled and
+   implemented (section 14).
 4. Full validator catalog for `::`, especially email and nonempty-string semantics.
 5. Future datetime fractional precision. Current whole dates and whole-second
    UTC timestamps, Gregorian validity, and years 0001–9999 are settled and implemented.
@@ -2279,8 +2288,8 @@ These are not new agreed requirements; they are gaps worth resolving explicitly.
 11. Whether aliases of `int` receive exactly the same automatic-PK behavior.
 12. Future reusable-type defaults on keys. Current PK+FK fields permit
     inherited-type-compatible defaults and never generate IDs (section 9).
-13. Future unnamed role/self/multi-endpoint headers. Named header role rules and
-    generated keys from non-`id` PK names are implemented (section 14).
+13. Nested connection endpoints remain deferred. Named and unnamed role/self/
+    multi-endpoint headers and non-`id` generated keys are implemented (section 14).
 14. How to name a primary-key constraint without introducing a conflicting scope.
 15. Future trigger ordering, CLI output, and live SQLite validation. Current
     schema preflight precedes output; tables precede indexes; writer failures
@@ -2299,5 +2308,5 @@ These are not new agreed requirements; they are gaps worth resolving explicitly.
 - `as` naming syntax and non-braced index/constraint option bodies.
 - Automatic enforcement that every target has a reverse one-to-one row.
 
-Named role/self/multi-endpoint connections are implemented, including generated
-keys and overrides. Their unnamed variants remain unsupported future design.
+Named and unnamed role/self/multi-endpoint connections are implemented,
+including generated keys and overrides. Nested endpoints remain deferred.

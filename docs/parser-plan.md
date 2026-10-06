@@ -3,8 +3,8 @@
 Status: the first supported parser milestone (stages 1–4) is implemented and
 covered by tokenizer, parser, allocation-failure, and source-to-SQL tests.
 Stage 5 is partially implemented, including partial indexes, stored FKs,
-virtual relationships, named generated keys/overrides, distinct unroled unnamed
-pairs (explicit and implicit), and logical `date`. Stages below retain their
+virtual relationships, generated keys/overrides, extended explicit unnamed
+connections, exact-pair shorthand, and logical `date`. Stages below retain their
 historical milestone scope; they are not a complete list of current support.
 `? unique` / `#check unique` preserve a native_unique payload with empty field
 references and ordered, spanned options. Same-line brace options support exact
@@ -202,7 +202,7 @@ coverage. SQL documentation placement is still open, not part of this settled
 metadata-only implementation stage.
 Other generators, JSON, timezone companions, and expression-index columns
 remain unsupported. Date is implemented as described above.
-Explicit and implicit unnamed connections support distinct unroled pairs now. Reusable types are deferred indefinitely.
+Explicit unnamed connections support roles/self/multi-endpoints; shorthand matches exact pairs and generates only distinct-table pairs. Reusable types are deferred indefinitely.
 Numeric exponent notation and multiline literals are deferred.
 
 ## Settled syntax
@@ -451,7 +451,10 @@ Extend syntax models, parser, resolver, emitter, and tests together:
    ordinary docs, names, actions, valid defaults, checks, uniques and indexes apply.
    Duplicate explicit names remain errors. Multi/self override pipelines have OOM,
    ownership and SQLite runtime coverage. Explicit unnamed declarations and
-   `@.field` implicit generation support two distinct unroled normal tables.
+   `@.field` shorthand support exact pairs, including explicit role/self pairs.
+   Unnamed identity is the sorted DSL table-name multiset, retaining repeats and
+   excluding roles. Synthesized DSL/default SQL names join sorted table components
+   with `__n__`; SQL normalizes each DSL component, ignoring parent SQL aliases.
    Shorthand uses canonical DSL identity, reuses explicit unnamed declarations
    even later in source, and never prefills keys without an explicit `~~` there.
    Otherwise exactly one generated connection per pair appends after authored
@@ -459,10 +462,13 @@ Extend syntax models, parser, resolver, emitter, and tests together:
    it; named connections remain distinct. Private arena-owned expansion copies
    bind relationship sources before key generation without mutating parsed input.
    Optional destination hints validate normally. Missing/unknown/composite PK
-   endpoints and self/nested mappings are diagnosed; singular mappings still
+   endpoints and nested mappings are diagnosed; absent explicit self connections
+   diagnose rather than guessing roles. Singular mappings still
    need a unique source. Fixtures cover SQL neutrality, ownership, OOM, tuple
-   uniqueness, required keys, restrictive FKs and reverse indexes. Unnamed self,
-   roles and more than two endpoints remain unsupported. Generated
+   uniqueness, required keys, restrictive/cascading FKs and reverse indexes.
+   Explicit unnamed self/role/multi-endpoint connections are implemented.
+   Shorthand never selects a multi-endpoint connection by pair containment and
+   implicit multi-endpoint connections are never guessed. Generated
    DSL key names concatenate `camelCase(table-or-role DSL name)` and
    `PascalCase(PK DSL field name)` (`Author.id` → `authorId`; role `writer` with
    `accountKey` → `writerAccountKey`); existing SQL normalization still applies.
@@ -473,8 +479,9 @@ Extend syntax models, parser, resolver, emitter, and tests together:
    explicit keys keep authored order, and overrides do not move generated slots.
    Named casing removes underscores, uppercases the following byte, and changes
    only the initial byte otherwise (`URL` → `uRL`), preserving humps. Unnamed
-   sorting is implemented for distinct unroled unnamed pairs; unnamed role/tie
-   rules remain future design.
+   table/role sorting is implemented, including repeated tables. Role differences
+   do not distinguish unnamed identities; duplicate identities are rejected.
+   Nested connection endpoints remain deferred.
 5. Remaining directives and multiline literals after their rules are finalized.
 
 Do not build a full-v1 parser ahead of models and semantic support.

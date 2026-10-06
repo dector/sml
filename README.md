@@ -247,10 +247,13 @@ semantics. Duplicate explicit DSL names are still errors. Other explicit fields
 follow all generated slots in source order; extra PKs fail connection validation.
 Repeated-table roles bind to their generated slots, including overrides.
 
-Explicit unnamed connections support exactly two distinct, unroled endpoints:
-`~(Author, Book) { ... }`. Their canonical identity is the bytewise-sorted pair
-of exact DSL table names, independent of SQL `#name` overrides. Reversed headers
-are the same identity and duplicate declarations are errors. Named connections
+Explicit unnamed connections support two or more endpoints, including roles,
+self-pairs and repeated tables: `~(left Author, right Author, Book) { ... }`.
+Their identity is the bytewise-sorted **multiset** of exact DSL table names:
+repeats are retained and roles are excluded. Thus `(A, A)` and `(A, A, A)`
+are distinct, but changing roles never distinguishes identities. Repeated tables
+require distinct explicit roles. SQL `#name` overrides do not affect identity.
+Reversed headers are the same identity and duplicate declarations are errors. Named connections
 with these endpoints remain distinct. The synthesized DSL name is
 `Author__n__Book`; the default SQL name normalizes each DSL endpoint separately
 and joins them with `__n__`, yielding `author__n__book`. Parent SQL aliases do not
@@ -258,14 +261,18 @@ affect it; a connection `#name` overrides only its SQL name. Normal namespace
 collision checks still apply. Explicit `@Author__n__Book.field` mappings may use
 the synthesized DSL name.
 
-Unnamed `~~` keys and endpoint metadata use canonical endpoint order; authored
+Unnamed `~~` keys and endpoint metadata sort by exact table DSL name, then
+role DSL name (bytewise, case-sensitive); authored
 keys without `~~` retain exact written order. Without `~~`, all endpoint keys
 must be written: an explicit declaration never gets automatic key prefill.
 
 Shorthand `~books Book[] @.authorId` selects the unnamed connection by the
 owner/target canonical DSL identity. An explicit unnamed declaration wins even
-when declared later, including its authored keys and options; otherwise one
-connection with generated keys is appended per pair. Opposite-side relationships
+when declared later, including role/self pairs and authored keys/options.
+Lookup requires the exact two-endpoint identity, never pair containment in a
+multi-endpoint connection. Otherwise one generated connection is appended per
+distinct-table pair. Self shorthand requires an explicit connection with roles;
+it diagnoses missing declarations rather than guessing roles. Opposite-side relationships
 share it. Generated tables append in globally sorted canonical identity order,
 independent of relationship order. An optional `<<bookId` hint is validated,
 though the destination is normally inferred. Both endpoints must be existing
@@ -273,8 +280,9 @@ normal tables with one PK. Generated keys are nonnullable and composite-unique,
 so singular mappings need an explicit connection with a unique source key.
 Named connections with the same pair are not reused. Missing authored source
 fields are errors, never guessed or generated. Relationships/docs emit no SQL
-or queries. Unnamed roles, self-pairs, more than two endpoints and nested
-connections remain unsupported; use named connections for self/role mappings.
+or queries. Multi-endpoint mappings use the synthesized DSL name explicitly,
+with `<<field` when the destination is ambiguous. Implicit multi-endpoint
+connections are never guessed. Nested connection endpoints remain deferred.
 
 Complete explicit-key example (forward mappings are allowed):
 

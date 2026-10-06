@@ -12,26 +12,25 @@ pub fn validate(schema: resolved.Schema, table: resolved.Table) error{InvalidCon
     const endpoints = connection.endpoints;
     if (endpoints.len < 2) return error.InvalidConnection;
     if (connection.unnamed) {
-        if (endpoints.len != 2 or endpoints[0].role != null or endpoints[1].role != null or
-            endpoints[0].table_index >= schema.tables.len or endpoints[1].table_index >= schema.tables.len)
-            return error.InvalidConnection;
-        const a = schema.tables[endpoints[0].table_index].dsl_name;
-        const b = schema.tables[endpoints[1].table_index].dsl_name;
-        if (std.mem.order(u8, a, b) != .lt) return error.InvalidConnection;
-        const key = try @import("connection_identity.zig").canonicalKey(a, b);
         const identity = connection.identity orelse return error.InvalidConnection;
-        if (!identity.eql(key)) return error.InvalidConnection;
+        if (identity.endpoints.len != endpoints.len) return error.InvalidConnection;
+        for (endpoints, 0..) |endpoint, i| {
+            if (endpoint.table_index >= schema.tables.len) return error.InvalidConnection;
+            const name = schema.tables[endpoint.table_index].dsl_name;
+            if (!std.mem.eql(u8, name, identity.endpoints[i])) return error.InvalidConnection;
+            if (i > 0) {
+                const order = std.mem.order(u8, identity.endpoints[i - 1], name);
+                if (order == .gt) return error.InvalidConnection;
+                if (order == .eq and std.mem.order(u8, endpoints[i - 1].role orelse "", endpoint.role orelse "") != .lt)
+                    return error.InvalidConnection;
+            }
+        }
         var identities: usize = 0;
         for (schema.tables) |other| {
             const candidate = other.connection orelse continue;
             if (!candidate.unnamed) continue;
-            if (candidate.endpoints.len != 2 or candidate.endpoints[0].table_index >= schema.tables.len or candidate.endpoints[1].table_index >= schema.tables.len)
-                return error.InvalidConnection;
-            const other_key = try @import("connection_identity.zig").canonicalKey(
-                schema.tables[candidate.endpoints[0].table_index].dsl_name,
-                schema.tables[candidate.endpoints[1].table_index].dsl_name,
-            );
-            if (key.eql(other_key)) identities += 1;
+            const other_key = candidate.identity orelse return error.InvalidConnection;
+            if (identity.eql(other_key)) identities += 1;
         }
         if (identities != 1) return error.InvalidConnection;
     } else if (connection.identity != null) return error.InvalidConnection;
@@ -84,6 +83,7 @@ pub fn validate(schema: resolved.Schema, table: resolved.Table) error{InvalidCon
             }
         }
         if (matching_keys != occurrences) return error.InvalidConnection;
+        if (occurrences == 1 and endpoint.column_index == null) return error.InvalidConnection;
         if (endpoint.column_index) |ci| {
             if (ci >= table.columns.len) return error.InvalidConnection;
             const column = table.columns[ci];

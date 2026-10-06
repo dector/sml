@@ -31,6 +31,7 @@ test {
     _ = @import("generated_connection_test.zig");
     _ = @import("generated_override_test.zig");
     _ = @import("unnamed_connection_test.zig");
+    _ = @import("extended_unnamed_test.zig");
     _ = @import("implicit_connection_test.zig");
     _ = @import("relationship_resolution_test.zig");
     _ = @import("relationship_integration_test.zig");
