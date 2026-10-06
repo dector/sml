@@ -362,6 +362,16 @@ Result = .schema OwnedSchema { schema, arena, deinit() } | .diagnostic { message
 - Resolution keeps its existing fully owned result. After successful resolution,
   the parsed result and source can be freed.
 - No multi-error recovery in the first implementation.
+- Delivered source rendering lives in the public `diagnostics` module, separate
+  from parsing/resolution. `formatParser` labels syntax errors; `formatResolver`
+  uses semantic enum tags. The generic writer-based `format` accepts a byte span,
+  message and optional category, with no allocator or combined compiler API.
+- Display locations are one-based Unicode code-point columns, not byte offsets
+  or terminal cell widths. Tabs render at four-column stops; excerpts and caret
+  ranges are bounded and controls/malformed UTF-8 are escaped. CRLF is one break.
+  Invalid spans return `InvalidSpan` before output; writer failures propagate.
+  See the README Diagnostics contract for edge cases and examples. CLI design
+  remains deferred.
 
 ## Implementation stages
 

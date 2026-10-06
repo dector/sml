@@ -4,6 +4,51 @@ SQLite Modeling Language.
 
 See [the v1 design](docs/design-v1.md) and [parser scope](docs/parser-plan.md).
 
+## Diagnostics
+
+The public `diagnostics` module writes plain-text errors to `*std.Io.Writer`:
+
+```zig
+try diagnostics.formatParser(writer, source_name, source, syntax.diagnostic);
+try diagnostics.formatResolver(writer, source_name, source, semantic.diagnostic);
+// For custom diagnostics; a null category omits the bracketed label:
+try diagnostics.format(writer, source_name, source, span, message, category);
+```
+
+Parser errors use `[syntax]`; resolver errors use the category's enum tag name.
+For example, an unknown field in `?? missing > 0` produces:
+
+```text
+schema.pzl:3:4: error [invalid_check]: unknown DSL field name
+  ?? missing > 0
+     ^~~~~~~
+```
+
+Contract:
+- Spans remain zero-based, end-exclusive **byte offsets** into the original source.
+  Retain that source until formatting even if resolution no longer needs it.
+- Locations are one-based lines and **Unicode code-point columns**, not byte,
+  grapheme or terminal-cell columns. Combining/wide characters count as one each;
+  malformed UTF-8 bytes count as one each. A byte offset inside a valid sequence
+  points to its code point.
+- Tabs count as one location column; excerpts expand them at four-column stops.
+  Escaped controls take their printed width for caret alignment. LF, CRLF and
+  lone CR are line breaks; an offset inside CRLF points to the preceding line end.
+- Empty/EOF and zero-length spans get one caret. Multiline ranges underline only
+  the first line and add `note: span continues beyond this line`.
+- Excerpts show at most 40 rendered columns before the caret and 120 from it,
+  snapping inward to complete code points/escapes/tabs. Clipped sides use `...`;
+  underlines are capped to the visible excerpt. No source-sized allocation occurs.
+- ASCII controls (including NUL and ESC), malformed bytes, C1 controls, bidi
+  controls and Unicode line separators are escaped. Filenames, messages and
+  category labels are sanitized too; header newlines/tabs cannot inject output.
+  There is no ANSI/color output. Unicode glyph cell widths are not modeled.
+- `error.InvalidSpan` means `start > end` or `end > source.len` and writes nothing.
+  `error.WriteFailed` propagates writer failures, possibly after partial output.
+  The formatter allocates nothing; an allocating writer reports OOM as WriteFailed.
+
+This is a library API, not a CLI interface or a combined compile API.
+
 ## Parser
 
 The library exports `parser.parse(allocator, source)`. It returns either an
