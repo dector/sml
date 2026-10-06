@@ -4,6 +4,37 @@ SQLite Modeling Language.
 
 See [the v1 design](docs/design-v1.md) and [parser scope](docs/parser-plan.md).
 
+## CLI quickstart
+
+Requires Zig 0.17.0. Build the library and compiler:
+
+```sh
+zig build
+./zig-out/bin/pzl schema.pzl > schema.sql
+cat schema.pzl | ./zig-out/bin/pzl > schema.sql
+zig build run -- schema.pzl
+```
+
+`pzl [FILE|-]` reads one file, or stdin until EOF when omitted or `-`.
+Use `pzl -- -schema.pzl` for filenames beginning with `-`. Quote filenames
+containing spaces. `--help` and `-h` print usage to stdout; help must be the
+only argument. Unknown options (including `--version`) and extra arguments
+print usage to stderr without reading input.
+
+Exit codes: **0** success/help, **1** compilation or IO failure, **2** invalid
+arguments. Successful compilation writes only SQL to stdout and nothing to
+stderr. Errors go to stderr, with no ANSI. Source diagnostics use the filename
+or `<stdin>` and one-based Unicode code-point columns (details below).
+Malformed UTF-8 is diagnosed and escaped, not passed to the terminal.
+IO errors use a short operation description and stable error name.
+
+Source input is limited to **16 MiB** (including stdin); larger input fails
+without SQL output. Parsing, resolution and SQL emission finish in memory
+before the first stdout write. Compiler failures therefore produce no partial
+SQL. A stdout IO failure exits 1 but can leave partial output. The compiler
+never modifies its input or opens a database; execute the SQL separately if
+wanted. Empty input emits `PRAGMA foreign_keys = ON;`.
+
 ## Diagnostics
 
 The public `diagnostics` module writes plain-text errors to `*std.Io.Writer`:
@@ -47,7 +78,7 @@ Contract:
   `error.WriteFailed` propagates writer failures, possibly after partial output.
   The formatter allocates nothing; an allocating writer reports OOM as WriteFailed.
 
-This is a library API, not a CLI interface or a combined compile API.
+This library API is also used by the CLI for parser and resolver errors.
 
 ## Parser
 
