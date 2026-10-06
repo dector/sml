@@ -64,3 +64,21 @@ CREATE TABLE "cascade_node" (
 ) STRICT;
 
 CREATE INDEX "child_label_idx" ON "child" ("label");
+
+CREATE INDEX "child_state_idx" ON "child" ("state");
+
+CREATE INDEX "child_stamp_idx" ON "child" ("stamp");
+
+CREATE INDEX "node_parent_idx" ON "node" ("parent");
+
+CREATE INDEX "left_right_idx" ON "left" ("right");
+
+CREATE INDEX "right_left_idx" ON "right" ("left");
+
+CREATE INDEX "cascade_child_parent_idx" ON "cascade_child" ("parent");
+
+CREATE INDEX "cascade_leaf_parent_idx" ON "cascade_leaf" ("parent");
+
+CREATE INDEX "null_child_parent_idx" ON "null_child" ("parent");
+
+CREATE INDEX "cascade_node_parent_idx" ON "cascade_node" ("parent");

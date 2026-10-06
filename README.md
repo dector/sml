@@ -115,7 +115,17 @@ emit `STRICT, WITHOUT ROWID`; composite and noninteger keys use ordinary STRICT
 tables with every PK part NOT NULL. Type-compatible defaults are allowed but must
 reference existing parents at runtime; omission without a default and explicit NULL
 fail. Ordinary integer PKs retain AUTOINCREMENT and NULL ID generation.
-No automatic FK indexes are created (next slice). Nonnullable set-null metadata
+StoredFK Slice6 resolves ordinary, nonunique FK indexes unless the FK is the
+leading column of a primary key, field/composite UNIQUE constraint, or full
+ordinary/unique index. Each single-column FK is checked independently. Partial
+indexes never count, even with a constant-true predicate. Full UNIQUE indexes
+cover nullable FKs too. A shared single-column PK+FK needs no extra index.
+Explicit indexes and names are resolved globally first. Generated names use
+`{table_sql}_{column_sql}_idx` and share the ASCII-case-insensitive table/index
+namespace. Collisions diagnose the FK field; no suffix is added. Rename an
+explicit partial index if it occupies the generated name, or rename the table/
+column when needed. Direct resolved-model emission only emits supplied indexes.
+Nonnullable set-null metadata
 fails emitter preflight before any output.
 Public resolved schemas must supply consistent FK metadata: SQL names match
 ASCII-case-insensitively, the target has exactly one real PK, and logical types

@@ -19,8 +19,8 @@ these syntax decisions require implementation updates, not just resolver changes
 - SQL output, not an ORM or query generator.
 - Fresh-schema creation, not migrations.
 - Stored foreign-key syntax, target/type resolution, SQL emission, and deletion
-  actions and shared-PK identity are implemented (StoredFK Slice5). Automatic FK
-  indexes are next; backrefs and generated connection tables remain planned.
+  actions, shared-PK identity, and automatic ordinary FK indexes are implemented
+  (StoredFK Slice6). Backrefs and generated connection tables remain planned.
 - Inline enums are implemented. Reusable types (including named enums) are
   deferred indefinitely; their examples below are design sketches, not supported syntax.
 - Role-named and multi-endpoint connections are included toward the end of v1.
@@ -965,7 +965,8 @@ with ON DELETE RESTRICT (default), CASCADE, or SET NULL. Field `#onDelete`
 accepts only restrict/cascade/setNull; duplicates, unknown actions, and table or
 non-FK scope are diagnosed. setNull requires local nullability, also enforced by
 emitter preflight before writing output. `#onUpdate` is unsupported. Automatic
-FK indexes, backrefs, and connection tables remain design, not implemented behavior.
+FK indexes are implemented in StoredFK Slice6; backrefs and connection tables
+remain design, not implemented behavior.
 
 ```text
 Book {
@@ -1022,14 +1023,23 @@ connections must enable it too. v1 does not generate runtime connection helpers.
 
 ### Automatic indexes
 
-Index FK columns automatically, unless an existing index already has the FK
-columns as its leading columns. Do not generate redundant indexes.
+The resolver adds ordinary nonunique indexes for each stored single-column FK
+unless it is the leading column of the primary key, a field/composite UNIQUE
+constraint, or an explicit full ordinary/unique index. Rowid integer keys and
+single-column shared PK+FK keys are covered. Full UNIQUE indexes also cover
+nullable FK lookups; uniqueness never propagates automatically to an FK.
 
 For a connection primary key `(authorId, bookId)`, its index covers `authorId`;
 `bookId` needs a separate index for reverse lookups.
 
-Implementation must account for coverage accurately: a partial index does not
-necessarily cover all FK rows. Index ordering matters.
+Partial indexes never provide coverage, even with a constant-true predicate.
+Index ordering matters. All explicit indexes/names resolve globally first, then
+automatic indexes are appended to the owned resolved index arrays. Names are
+`{table_sql}_{column_sql}_idx`, in the same ASCII-case-insensitive global
+namespace as tables and explicit indexes. Collisions report the FK field and
+never add a suffix: rename the explicit index (especially a partial index using
+the generated name), table, or column manually. The emitter does not generate
+indexes for directly supplied resolved models; normal index preflight applies.
 
 ### Self-FKs
 

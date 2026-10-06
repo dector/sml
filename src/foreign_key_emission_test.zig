@@ -77,6 +77,8 @@ test "public shared PK FK chain metadata validates each real target before outpu
             try std.testing.expectEqual(@as(usize, 0), sql.written().len);
         } else {
             try emitter.emit(schema, &sql.writer);
+            // Public resolved input is emitted as supplied, not auto-indexed.
+            try std.testing.expect(std.mem.indexOf(u8, sql.written(), "CREATE INDEX") == null);
             try std.testing.expect(std.mem.indexOf(u8, sql.written(), "TEXT NOT NULL PRIMARY KEY REFERENCES") != null);
             try std.testing.expect(std.mem.indexOf(u8, sql.written(), "WITHOUT ROWID") == null);
         }

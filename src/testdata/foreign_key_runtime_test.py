@@ -40,9 +40,11 @@ rows = list(db.execute('PRAGMA foreign_key_list(child)'))
 assert len(rows) == 4
 assert all(r[5] == 'NO ACTION' and r[6] == 'RESTRICT' for r in rows)
 assert {r[1] for r in db.execute('PRAGMA index_list(child)')} == {
-    'child_label_idx', 'sqlite_autoindex_child_1'}
-for table in ['node', 'left', 'right']:
-    assert not list(db.execute(f'PRAGMA index_list("{table}")'))
+    'child_label_idx', 'child_state_idx', 'child_stamp_idx', 'sqlite_autoindex_child_1'}
+for table, column in [('node', 'parent'), ('left', 'right'), ('right', 'left')]:
+    indexes = list(db.execute(f'PRAGMA index_list("{table}")'))
+    assert len(indexes) == 1 and indexes[0][1] == f'{table}_{column}_idx'
+    assert indexes[0][2] == 0 and indexes[0][4] == 0
 # Same-row self references and cycles formed using existing parent keys are valid.
 db.execute('INSERT INTO node VALUES (1, 1)')
 db.execute('INSERT INTO node VALUES (2, 1)')

@@ -61,7 +61,7 @@ fn pipeline(allocator: std.mem.Allocator) !void {
     try std.testing.expectEqual(@as(usize, 1), owner.checks.len);
     try std.testing.expectEqual(@as(usize, 1), owner.unique_constraints.len);
     try std.testing.expectEqual(@as(usize, 1), tables[0].checks.len);
-    try std.testing.expectEqual(@as(usize, 1), tables[0].indexes.len);
+    try std.testing.expectEqual(@as(usize, 7), tables[0].indexes.len);
     try std.testing.expectEqual(resolved.StorageType.datetime, tables[0].columns[2].type);
     try std.testing.expect(tables[0].columns[2].default.? == .now);
     try std.testing.expectEqualStrings("2000-02-29T00:00:00Z", tables[0].columns[3].default.?.datetime);
@@ -70,7 +70,7 @@ fn pipeline(allocator: std.mem.Allocator) !void {
     try std.testing.expectEqualStrings("true", tables[0].columns[6].default.?.text);
     try std.testing.expectEqualStrings("node", tables[3].columns[1].foreign_key.?.target_table_sql_name);
     try std.testing.expectEqual(resolved.StorageType.integer, tables[3].columns[1].type);
-    try std.testing.expectEqual(@as(usize, 0), tables[3].indexes.len);
+    try std.testing.expectEqual(@as(usize, 1), tables[3].indexes.len);
     var sql = std.Io.Writer.Allocating.init(allocator);
     defer sql.deinit();
     emitter.emit(result.schema.schema, &sql.writer) catch |err| switch (err) {
