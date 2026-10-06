@@ -127,6 +127,18 @@ test "every incomplete relationship prefix reports EOF without partial schemas" 
     }
 }
 
+test "documentation cannot attach to relationship mapping fragments or options" {
+    for ([_][]const u8{
+        "T {\n ~books Book[]\n --- mapping docs\n @Book.owner\n}",
+        "T {\n ~books Book[] @\n --- table docs\n Book.owner\n}",
+        "T {\n ~books Book[] @Book.\n --- field docs\n owner\n}",
+        "T {\n ~books Book[] @Book.owner {\n --- option docs\n #index\n }\n}",
+        "T {\n ~books Book[] @Book.owner =\n   --- option docs\n   #index\n}",
+        "T {\n ~books Book[] @Book.owner\n --- directive docs\n #index owner\n}",
+        "T {\n ~books Book[] @Book.owner(null)\n}",
+    }) |source| _ = try diagnostic(source);
+}
+
 test "relationship documentation obeys declaration attachment and scope rules" {
     for ([_][]const u8{
         "T {\n  --- docs\n\n  ~books Book[] @Book.owner\n}",

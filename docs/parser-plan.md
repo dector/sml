@@ -155,7 +155,7 @@ leading FK columns cover the lookup; otherwise a deterministic ordinary index
 is generated. Partial indexes do not cover it. See design §12,
 `src/foreign_key_index_test.zig`, and `src/foreign_key_resolution_test.zig`,
 `src/foreign_key_emission_test.zig`, and the Python runtime fixture.
-VirtualRelationships Slice3 resolves direct collections (`~books Book[]
+VirtualRelationships Slice4 resolves direct collections (`~books Book[]
 @Book.publisher`) after all columns/FKs and SQL names are finalized. Target/source
 lookups use exact DSL names; source must equal target, and its stored FK must
 reference the owner's single PK. The target itself may be keyless. Forward and
@@ -172,7 +172,20 @@ names/collisions, owner FK mappings, and singular proofs before any writes,
 using the same uniqueness helper as resolution (`src/unique.zig`). Invalid
 metadata returns `InvalidRelationship`. Owned arenas clean up partial resolution
 on OOM, including documented, SQL-renamed, forward/self singular mappings.
-See `src/relationship_resolution_test.zig` for ownership/OOM and mapping coverage.
+Slice4 documentation ownership and SQL neutrality integration is settled.
+Relationship docs are preserved as owned text-only metadata, not discarded;
+they do not emit SQL comments. No SQL placement convention has been chosen.
+`src/relationship_integration_test.zig` compares independently parsed sources
+with/without virtual declarations and their comments byte-for-byte, checks
+interleaved declaration spans and resolved table/column indices after freeing
+source and parsed storage, exercises all allocation failures and standard writer
+failure/preflight ordering. The direct relationship SQL/runtime fixture covers
+cross/self collections and singular mappings, named real UNIQUE constraints,
+actual FKs, no virtual columns, and no redundant FK indexes. Existing EOF,
+documentation detachment, forbidden options, and FK index coverage remain tested.
+See `src/relationship_resolution_test.zig` for further ownership/OOM and mapping
+coverage. SQL documentation placement is still open, not part of this settled
+metadata-only implementation stage.
 Other generators, date/JSON, expression indexes, and
 connections come in later slices. Reusable types are deferred indefinitely.
 Numeric exponent notation and multiline literals are deferred.

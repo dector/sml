@@ -135,14 +135,16 @@ SQLite enforcement requires `PRAGMA foreign_keys = ON` **on every connection,
 before starting a transaction**. The emitted script includes this PRAGMA, but
 running it inside an already-open transaction does not enable enforcement.
 
-VirtualRelationships Slice3 resolves direct collections such as
+VirtualRelationships Slice4 resolves direct collections such as
 `~books Book[] @Book.publisher`. Target and source use exact DSL table names;
 they must be the same table. The source names a stored FK pointing to the owner's
 single PK, using final SQL names (including `#name`). The collection target may
 be keyless. Forward/self mappings work. Virtual names share the exact,
 case-sensitive DSL namespace with stored fields and other relationships, not
 SQL identifiers. Owned metadata preserves docs/spans and table/declaration order;
-relationships produce no SQL. Documentation output placement is undecided.
+relationships produce no SQL. Relationship documentation is preserved as owned,
+text-only metadata in this interim implementation; it is not discarded and does
+not emit SQL comments. SQL output placement remains an open design decision.
 Direct singular relationships (`~author Author? @Author.profile`) are supported.
 They must be nullable, and their backing FK must have a single-column PK,
 field/table UNIQUE, or full single-column unique index. Composite keys and all
@@ -152,6 +154,32 @@ nonnullable and need no uniqueness. Connection relationships remain unsupported.
 Relationships cannot carry defaults/directives. Public relationship metadata is
 validated across the whole schema before any SQL is written; invalid mappings,
 indices, names, collisions, or cardinality proofs return `InvalidRelationship`.
+
+```pzl
+Owner {
+  !id int
+  --- All stored items for this owner
+  ~items Item[] @Item.owner
+  --- At most one item, proven by the real UNIQUE below
+  ~profile Item? @Item.owner
+}
+Item {
+  *owner Owner? {
+    ? unique
+  }
+}
+```
+
+Read `result.schema.schema.relationships` after resolution. Each entry has an
+owned `dsl_name`, declaration/documentation spans, optional documentation text,
+cardinality, and zero-based `owner_table_index`, `target_table_index`,
+`source_table_index`, and `backing_column_index`. Table indices refer to resolved
+`tables`; the backing index refers to the source table's stored `columns`, not
+its interleaved declaration position. The resolved arena owns this metadata:
+parsed storage and source can be freed before reading it or emitting SQL.
+Direct mappings describe existing FKs. They are **not query loading** and create
+no SQL columns, constraints, tables, or indexes. Real FK index coverage is
+unchanged. Connections are next and remain unsupported.
 
 `expression_parser.parse(allocator, source)` separately parses one literal,
 ordinary identifier reference (`[A-Za-z_][A-Za-z0-9_]*`), or standalone `_`
@@ -231,5 +259,7 @@ python3 src/testdata/encoding_runtime_test.py
 python3 src/testdata/enum_runtime_test.py
 python3 src/testdata/expression_runtime_test.py
 python3 src/testdata/check_runtime_test.py
+# Run every SQLite runtime fixture:
+for test in src/testdata/*_runtime_test.py; do python3 "$test"; done
 ```
 
