@@ -1166,10 +1166,19 @@ Both fields are non-null and form one composite primary key, preventing duplicat
 pairs. Their types come from the referenced primary keys. FK deletion defaults
 remain `restrict`, not implicit cascade.
 
-Default generated key names are `<table-or-role><primary-key-field>` in camelCase,
-for example `authorId`. SQL normalization produces `author_id`. The discussion
-settled the `id` examples; exact casing rules for other key names remain to be
-specified.
+The agreed generated DSL key name is
+`camelCase(table-or-role DSL name) + PascalCase(primary-key DSL field name)`.
+Use the role when present, otherwise the table name: `Author.id` generates
+`authorId`; role `writer` with PK `accountKey` generates `writerAccountKey`.
+SQL names then use the existing normalization rules as usual (`author_id`,
+`writer_account_key`), unless overridden with `#name`. SQL aliases never supply
+these components.
+
+This settles the component formula, not a new acronym/underscore conversion
+policy. The existing implementation only converts DSL names to SQL snake_case;
+it has no camelCase/PascalCase component helper. Keep component edge cases
+consistent when implementing this future feature; do not infer a new casing
+algorithm from these examples.
 
 ### Explicit unnamed declaration
 
@@ -1219,8 +1228,9 @@ Self-connections use distinct fields without guessing role bindings. Metadata ow
 relationship names, documentation/spans, and destination indices after input and
 parsed storage are freed. Virtual relationship documentation emits no SQL.
 Collections preserve tuples: no generated queries, implicit deduplication, or sort.
-Header order preserves endpoint metadata only, not composite PK order. Endpoint
-keys have no automatic prefill or ID generation. Payload defaults/checks/uniqueness
+For these implemented explicit-key connections, header order preserves endpoint
+metadata only, not composite PK order. Endpoint keys have no automatic prefill
+or ID generation. Payload defaults/checks/uniqueness
 and FK deletion actions work exactly as in ordinary tables. The first PK column
 covers its FK lookup; other uncovered FKs receive ordinary indexes.
 Nested endpoints remain deferred. Unnamed connections and generated-key sections
@@ -1273,7 +1283,9 @@ a duplicate column. `bookId` retains its generated defaults.
 
 Overrides match by **DSL field name**, not SQL name. They preserve the generated
 field's structural role: non-null FK to the same endpoint, and a component of the
-connection's composite primary key. Names and FK options can change.
+connection's composite primary key. Names and FK options can change. An override
+also preserves the generated field's slot and composite-PK position; its authored
+location does not move the generated field.
 
 ### Identity and ordering
 
@@ -1289,8 +1301,22 @@ a duplicate-definition error. Use deterministic naming such as
 `author__n__book`. Named connections are distinct by their declared names.
 
 Connection identity being order-independent does not make composite index order
-irrelevant. **Open detail:** define one consistent generated key ordering rule;
-the conversation did not choose the exact canonical ordering algorithm.
+irrelevant. The agreed future generated-key ordering rules are:
+
+- Named connections generate endpoint fields in **header endpoint order**.
+- Unnamed connections generate endpoint fields in canonical ascending order of
+  the exact **table DSL name**, independent of header order. For role endpoints,
+  compare the table DSL name first, then the exact role DSL name to break ties.
+  Repeated tables still require distinct explicit roles.
+- The lexical comparator is bytewise ASCII, case-sensitive, over DSL names,
+  never normalized SQL names or `#name` aliases.
+
+The generated composite PK follows that generated field order. Fully explicit
+keys instead retain authored field order, as currently implemented: their first
+written PK field remains first regardless of header or canonical endpoint order.
+An explicit override of a generated field keeps its generated slot; it does not
+switch that field to authored-key ordering. These rules are design decisions,
+not a claim that unnamed connections or generated keys are implemented.
 
 ### Role names (future generated-key design)
 
@@ -2180,9 +2206,10 @@ These are not new agreed requirements; they are gaps worth resolving explicitly.
 1. Deferred multiline-string edge cases: blank markers, dedent tabs, and line
    endings. Single-line strings, quote doubling, literal backslashes, and
    hash-delimited backticks are settled.
-2. Generated key/index/trigger naming. Ordinary camelCase/acronym conversion is
-   settled in section 5.
-3. Canonical generated key ordering for order-independent unnamed connections.
+2. Generated index/trigger naming. Section 5 covers ordinary SQL name normalization.
+3. Generated DSL key component casing edge cases (acronyms/underscores). Section
+   14 settles the component formula and named/unnamed generated-key order;
+   canonical ordering is no longer an open design choice.
 4. Full validator catalog for `::`, especially email and nonempty-string semantics.
 5. Exact date/datetime format, precision, calendar validity checks, and accepted range.
 6. Nullable/constrained explicit timezone-field compatibility.

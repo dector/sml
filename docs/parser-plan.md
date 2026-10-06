@@ -423,8 +423,19 @@ Extend syntax models, parser, resolver, emitter, and tests together:
    with ordinary explicit FK tables, owned metadata after source/parsed teardown,
    full parse→resolve→emit OOM coverage, and runtime payload/default/constraint,
    custom-name deletion, explicit-key omission, and reverse-index coverage checks.
-   Header order is never a generated-key ordering rule; keys are not prefilled.
-   Nested endpoints, unnamed connections, and `~~` generated keys remain deferred.
+   Implemented explicit keys retain authored PK field order, not header order;
+   keys are not prefilled. Nested endpoints, unnamed connections, and `~~`
+   generated keys remain deferred. Agreed future rules (design §14): generated
+   DSL key names concatenate `camelCase(table-or-role DSL name)` and
+   `PascalCase(PK DSL field name)` (`Author.id` → `authorId`; role `writer` with
+   `accountKey` → `writerAccountKey`); existing SQL normalization still applies.
+   Named generated fields follow header endpoint order. Unnamed generated fields
+   sort by exact table DSL name, then exact role DSL name for ties, using bytewise
+   ASCII case-sensitive comparison rather than SQL names. Repeated tables still
+   require distinct roles. Generated composite PKs follow generated field order;
+   explicit keys keep authored order, and overrides do not move generated slots.
+   Acronym/underscore component casing needs consistent clarification during
+   implementation; these design choices do not add current feature support.
 5. Remaining directives and multiline literals after their rules are finalized.
 
 Do not build a full-v1 parser ahead of models and semantic support.

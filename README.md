@@ -196,13 +196,24 @@ unique (single-column PK/UNIQUE/full unique index); a composite connection PK
 alone does not suffice. The destination FK already identifies one target record.
 All relationships remain virtual and emit no SQL, including their documentation.
 NamedConnections Slice4 exercises the complete explicit-key pipeline and SQLite
-runtime behavior; it adds no generated features. Header endpoint order is metadata
-order, **not key order**. Every endpoint key must be supplied on insert: there is
+runtime behavior; it adds no generated features. For implemented explicit keys,
+header endpoint order is metadata order, **not key order**. Every endpoint key
+must be supplied on insert: there is
 no automatic prefill or ID generation for connection keys. Payload defaults,
 checks, uniqueness, indexes, and FK deletion policies behave like ordinary tables.
 The PK covers reverse FK lookups only for its first key; remaining uncovered FKs
 receive ordinary indexes. Nested endpoints, unnamed connections, and `~~`
 generated keys remain deferred.
+
+Agreed future generated-connection rules (design §14): DSL key names are
+`camelCase(table-or-role DSL name) + PascalCase(PK DSL field name)`:
+`Author.id` → `authorId`, role `writer` with `accountKey` → `writerAccountKey`.
+SQL normalization remains unchanged. Named generated fields follow header
+endpoint order; unnamed fields sort by exact table DSL name, then role DSL name
+for ties, using bytewise ASCII case-sensitive comparison, never SQL names.
+Generated composite PKs follow that order; explicit keys keep authored order,
+and overrides keep their generated slots. Component casing edge cases remain
+for implementation to clarify consistently; these rules are not implemented.
 
 Complete explicit-key example (forward mappings are allowed):
 
