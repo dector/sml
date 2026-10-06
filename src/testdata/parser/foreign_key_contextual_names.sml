@@ -3,16 +3,19 @@ Child {
   *clock datetime(2)
   *choice str(`it's ready`)
 }
+
 enum {
   #name `Enum Exact`
   !key int {
     #name `Integer Key`
   }
 }
+
 datetime {
   #name `Datetime Exact`
   !key int
 }
+
 str {
   #name `Str Exact`
   !key enum {

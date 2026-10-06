@@ -5,12 +5,14 @@ Reader {
     #name `Person Key`
   }
 }
+
 Book {
   #name `Books Exact`
   !key str {
     #name `Book Key`
   }
 }
+
 --- Explicit stored borrow tuples.
 Borrow {
   #name `Borrow Exact`
@@ -37,6 +39,7 @@ Borrow {
     #name `State Lookup`
   }
 }
+
 --- Three-role stored tuples.
 Trio {
   #name `Triple Exact`

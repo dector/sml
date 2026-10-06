@@ -13,10 +13,12 @@ Ranges {
   }
   #check `"high value" < 100`
 }
+
 Flags {
   #check enabled
   enabled bool?
 }
+
 Times {
   ?? finish >= start
   start datetime?

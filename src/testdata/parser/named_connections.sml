@@ -9,12 +9,14 @@ Reader {
   --- Virtual peers, preserving triples.
   ~peers Reader[] @Trio.origin <<destination
 }
+
 Book {
   #name `Books Exact`
   !key str {
     #name `Book Key`
   }
 }
+
 --- Explicit stored borrow tuples.
 ~Borrow(person Reader, publication Book) {
   #name `Borrow Exact`
@@ -41,6 +43,7 @@ Book {
     #name `State Lookup`
   }
 }
+
 --- Three-role stored tuples.
 ~Trio(originRole Reader, destinationRole Reader, contextRole Reader) {
   #name `Triple Exact`

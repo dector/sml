@@ -7,6 +7,7 @@ Owner {
   }
   label str
 }
+
 Item {
   #name `Items`
   note str
@@ -18,6 +19,7 @@ Item {
     }
   }
 }
+
 Node {
   #name `Nodes`
   !id int

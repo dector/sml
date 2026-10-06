@@ -6,10 +6,12 @@
   }
   note str('ready')
 }
+
 Author {
   #name `Writer`
   !id int
 }
+
 Book {
   !id int
 }

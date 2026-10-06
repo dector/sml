@@ -12,6 +12,7 @@ Owner {
   ~profile Item? @Item.owner
   label str
 }
+
 Item {
   #name `Items`
   note str
@@ -23,6 +24,7 @@ Item {
     }
   }
 }
+
 Node {
   #name `Nodes`
   --- Self collection

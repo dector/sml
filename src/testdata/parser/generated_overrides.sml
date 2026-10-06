@@ -14,6 +14,7 @@
   ~~
   #index authorId, stateCode
 }
+
 ~Self(left Author, right Author, context Author) {
   label str('ready')
   *!contextId Author(3)
@@ -23,11 +24,13 @@
   }
   #index rightId, leftId
 }
+
 Author {
   !id int {
     #name `Actual Key`
   }
 }
+
 State {
   !code enum {
     #of ready, done

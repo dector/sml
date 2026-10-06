@@ -19,6 +19,7 @@ Ranges {
     #name `upper required`
   }
 }
+
 Flags {
   enabled bool? {
     ? _ != false {
@@ -26,6 +27,7 @@ Flags {
     }
   }
 }
+
 Safe {
   n int {
     #check _ > 0 {

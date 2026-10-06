@@ -31,12 +31,15 @@ Child {
   }
   ?? unique(composite, tail)
 }
+
 Parent {
   !id int
 }
+
 Shared {
   *!id Parent
 }
+
 Rowid {
   !id int
   *parent Parent? {

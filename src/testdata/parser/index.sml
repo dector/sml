@@ -3,8 +3,8 @@ Records {
   #name `record" store`
   first str =
     #index {
-#name #`first" lookup`#
- }
+      #name #`first" lookup`#
+    }
     #check _ != ''
     #index {}
   second int {
@@ -18,6 +18,7 @@ Records {
     #name `alternate`
   }
 }
+
 Other {
   value int {
     #index
