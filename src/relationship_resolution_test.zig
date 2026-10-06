@@ -114,7 +114,7 @@ test "public relationship preflight checks complete metadata before writes" {
     var result = try resolver.resolve(std.testing.allocator, syntax.schema.schema);
     defer result.schema.deinit();
     const original = result.schema.schema.relationships[0];
-    var variants: [12]resolved.Relationship = undefined;
+    var variants: [15]resolved.Relationship = undefined;
     @memset(&variants, original);
     variants[0].owner_table_index = 99;
     variants[1].target_table_index = 99;
@@ -128,6 +128,9 @@ test "public relationship preflight checks complete metadata before writes" {
     variants[9].dsl_name = "true";
     variants[10].dsl_name = "a\x00b";
     variants[11].dsl_name = "1bad";
+    variants[12].dsl_name = "false";
+    variants[13].dsl_name = "null";
+    variants[14].dsl_name = "_";
     for (variants) |bad| {
         var schema = result.schema.schema;
         // A valid earlier relation must not cause any output before the bad one.
@@ -282,6 +285,19 @@ test "duplicate relationship names use the exact DSL namespace" {
     const result = try resolver.resolve(std.testing.allocator, syntax.schema.schema);
     try std.testing.expectEqual(.duplicate_dsl_name, result.diagnostic.category);
     try std.testing.expectEqualDeep(syntax.schema.schema.tables[0].relationships[1].name.span, result.diagnostic.span);
+}
+
+test "manually parsed relationship reserved names receive identifier diagnostics" {
+    for ([_][]const u8{ "true", "false", "null", "_" }) |name| {
+        var syntax = try parser.parse(std.testing.allocator, source);
+        defer syntax.schema.deinit();
+        const relationship = &@constCast(syntax.schema.schema.tables[0].relationships)[0];
+        relationship.name.text = name;
+        const result = try resolver.resolve(std.testing.allocator, syntax.schema.schema);
+        try std.testing.expect(result == .diagnostic);
+        try std.testing.expectEqual(.invalid_identifier, result.diagnostic.category);
+        try std.testing.expectEqualDeep(relationship.name.span, result.diagnostic.span);
+    }
 }
 
 test "manually constructed nullable collection is rejected" {

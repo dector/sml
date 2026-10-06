@@ -18,11 +18,23 @@ pub fn singleColumn(table: @import("model/resolved.zig").Table, ci: usize) bool 
     return false;
 }
 
-/// Exact declaration identifier syntax; only Boolean literals are reserved.
+/// Exact declaration identifier syntax; true, false, null, and standalone _ are reserved.
 pub fn dslName(name: []const u8) bool {
     if (name.len == 0 or (!std.ascii.isAlphabetic(name[0]) and name[0] != '_')) return false;
     for (name[1..]) |c| if (!std.ascii.isAlphanumeric(c) and c != '_') return false;
-    return !std.mem.eql(u8, name, "true") and !std.mem.eql(u8, name, "false");
+    inline for (.{ "true", "false", "null", "_" }) |reserved| {
+        if (std.mem.eql(u8, name, reserved)) return false;
+    }
+    return true;
+}
+
+test "DSL names match declaration identifier grammar" {
+    for ([_][]const u8{ "", "true", "false", "null", "_", "1name", "bad-name", "a\x00b" }) |name| {
+        try std.testing.expect(!dslName(name));
+    }
+    for ([_][]const u8{ "name", "_name", "name1", "unique", "str", "enum", "now", "True", "NULL" }) |name| {
+        try std.testing.expect(dslName(name));
+    }
 }
 
 pub fn sameFields(a: []const usize, b: []const usize) bool {
