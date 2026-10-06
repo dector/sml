@@ -1198,6 +1198,19 @@ explicit key declarations.
 
 ### Named connections
 
+**Implemented (NamedConnections Slice2):** named headers with explicit `*!`
+keys only. Endpoints are existing normal tables with exactly one PK (including
+inherited FK PK types). Keys form a nonnullable composite PK whose FK target
+multiset exactly covers the header. No `#allow reuse` or implicit keys. Ordinary
+payload fields and non-PK FKs are allowed; SQL PK order is written field order.
+Endpoint roles are exact DSL-unique names. Repeated tables require distinct
+explicit roles. Their resolved `column_index` stays null: arbitrary explicit key
+names and declaration order do not establish role bindings. Unique-table
+endpoints bind their single matching key. Public resolved schemas may provide
+distinct valid bindings; SQL validates all connection metadata before output.
+Nested endpoints and relationships through connections are deferred. Unnamed
+connections and `~~` below describe future design, not current support.
+
 ```text
 ~Authorship(Author, Book) {
   ~~

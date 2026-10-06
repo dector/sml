@@ -403,7 +403,11 @@ Extend syntax models, parser, resolver, emitter, and tests together:
    composite uniqueness, expression precedence, field checks, and table checks
    are implemented; expression-index columns remain deferred pending grammar).
 3. Stored FKs and virtual relationships.
-4. Named/unnamed connections, roles, generated keys, and destination hints.
+4. NamedConnections Slice2 implements named connections, roles, and explicit
+   composite PK FK keys. Endpoint target multisets are validated by a shared
+   resolver/emitter helper. Repeated-table role bindings remain null; explicit
+   key names/order do not imply roles. Nested endpoints, connection collections,
+   unnamed connections, generated keys, and destination hints remain deferred.
 5. Remaining directives and multiline literals after their rules are finalized.
 
 Do not build a full-v1 parser ahead of models and semantic support.

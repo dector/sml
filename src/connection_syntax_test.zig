@@ -45,9 +45,8 @@ test "named connection is a marked ordinary table with explicit keys and body me
 
     const semantic = try resolver.resolve(std.testing.allocator, syntax.schema.schema);
     try std.testing.expect(semantic == .diagnostic);
-    try std.testing.expectEqual(resolver.Category.unsupported_feature, semantic.diagnostic.category);
-    try std.testing.expectEqualDeep(table.connection.?.span, semantic.diagnostic.span);
-    try std.testing.expectEqualStrings("Named connection resolution is not yet supported", semantic.diagnostic.message);
+    // The header is supported; the field-scoped check cannot reference position.
+    try std.testing.expectEqual(resolver.Category.invalid_check, semantic.diagnostic.category);
 }
 
 test "connection roles self endpoints mixtures and grouping trivia preserve exact spans" {
@@ -128,7 +127,7 @@ fn allocatedConnections(allocator: std.mem.Allocator) !void {
     try borrowed(source, table.connection.?.endpoints[2].role.?);
     const semantic = try resolver.resolve(allocator, first.schema.schema);
     try std.testing.expect(semantic == .diagnostic);
-    try std.testing.expectEqual(resolver.Category.unsupported_feature, semantic.diagnostic.category);
+    try std.testing.expectEqual(resolver.Category.unknown_foreign_key_target, semantic.diagnostic.category);
     var invalid = try parser.parse(allocator, "--- Docs\n~Bad(a A, B) {\n*!a A\n~~\n}\n");
     if (invalid == .schema) {
         invalid.schema.deinit();
@@ -137,14 +136,13 @@ fn allocatedConnections(allocator: std.mem.Allocator) !void {
     try std.testing.expectEqualStrings("Generated connection keys not yet supported", invalid.diagnostic.message);
 }
 
-test "resolver rejects connection metadata before unrelated type resolution" {
+test "resolver reports unrelated invalid types normally with connection headers" {
     var syntax = try parser.parse(std.testing.allocator, "Ordinary {\nvalue Unknown\n}\n~C(A, B) {}\n");
     try std.testing.expect(syntax == .schema);
     defer syntax.schema.deinit();
     const semantic = try resolver.resolve(std.testing.allocator, syntax.schema.schema);
     try std.testing.expect(semantic == .diagnostic);
-    try std.testing.expectEqual(resolver.Category.unsupported_feature, semantic.diagnostic.category);
-    try std.testing.expectEqualDeep(syntax.schema.schema.tables[1].connection.?.span, semantic.diagnostic.span);
+    try std.testing.expectEqual(resolver.Category.unknown_type, semantic.diagnostic.category);
 }
 
 test "connection arrays docs and failed resolution clean up at every allocation failure" {

@@ -170,6 +170,18 @@ Item {
 }
 ```
 
+NamedConnections Slice2 supports named stored connections with explicit `*!`
+keys only. Each normal endpoint table must have exactly one PK. The connection
+PK FK targets must exactly match the endpoint multiset; payload fields and
+additional non-PK FKs are allowed. Composite PK SQL preserves written key order.
+Repeated-table endpoints require distinct explicit roles. Resolved header-order
+`connection.endpoints` own exact roles and stable `table_index` values. Unique-table
+endpoints bind `column_index`; repeated-table roles leave it null. Neither key
+names nor declaration order imply role-to-column binding. SQL preflights public
+connection metadata and returns `InvalidConnection` before output on violations.
+Nested endpoints, collections through connections, unnamed connections, and `~~`
+generated keys remain deferred.
+
 Read `result.schema.schema.relationships` after resolution. Each entry has an
 owned `dsl_name`, declaration/documentation spans, optional documentation text,
 cardinality, and zero-based `owner_table_index`, `target_table_index`,

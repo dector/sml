@@ -7,7 +7,7 @@ const writeBlob = sql_writer.writeBlob;
 const resolved = @import("model/resolved.zig");
 const expression_emitter = @import("expression_emitter.zig");
 
-pub const Error = expression_emitter.Error || error{ NullablePrimaryKey, InvalidPrimaryKey, InvalidIdReuse, InvalidDefault, InvalidEnum, DefaultOnAutoPrimaryKey, InvalidCheck, InvalidUnique, InvalidIndex, SqlNameCollision, InvalidForeignKey, InvalidRelationship };
+pub const Error = expression_emitter.Error || error{ NullablePrimaryKey, InvalidPrimaryKey, InvalidIdReuse, InvalidDefault, InvalidEnum, DefaultOnAutoPrimaryKey, InvalidCheck, InvalidUnique, InvalidIndex, SqlNameCollision, InvalidForeignKey, InvalidRelationship, InvalidConnection };
 
 /// Emit tables and columns in schema order, then ordered table CHECK items.
 /// Zero-column tables (even checks-only tables) remain non-executable skeletons.
@@ -20,6 +20,7 @@ pub const Error = expression_emitter.Error || error{ NullablePrimaryKey, Invalid
 /// and not syntax-validated, including direct resolved enum raw-SQL defaults.
 /// Writer failures may leave partial output. The caller owns and flushes the writer.
 pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
+    for (schema.tables) |table| try @import("connection_validation.zig").validate(schema, table);
     try preflightRelationships(schema);
     for (schema.tables, 0..) |table, table_index| {
         for (schema.tables[0..table_index]) |prior| {

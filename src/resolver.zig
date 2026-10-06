@@ -38,6 +38,7 @@ pub const Category = enum {
     invalid_relationship_mapping,
     invalid_relationship_owner,
     unsupported_connection_relationship,
+    invalid_connection,
 };
 
 pub const Diagnostic = struct {
@@ -181,11 +182,6 @@ const Context = struct {
     }
 
     fn schema(self: *Context, input: parsed.Schema) Error!resolved.Schema {
-        // Never lower a connection as an ordinary table before endpoint binding exists.
-        for (input.tables) |table| {
-            if (table.connection) |connection|
-                return self.fail(.unsupported_feature, connection.span, "Named connection resolution is not yet supported");
-        }
         const graph = try self.allocator.alloc([]TypeNode, input.tables.len);
         // Validate DSL table identity before resolving references.
         for (input.tables, 0..) |table, i| {
@@ -440,6 +436,34 @@ const Context = struct {
             }
             table.indexes = try indexes.toOwnedSlice(self.allocator);
         }
+        // Preserve header order and own roles. Repeated-table roles deliberately
+        // remain unbound: neither key names nor declaration order imply a role.
+        for (input.tables, 0..) |table, ti| {
+            const connection = table.connection orelse continue;
+            const endpoints = try self.allocator.alloc(resolved.Endpoint, connection.endpoints.len);
+            for (connection.endpoints, 0..) |endpoint, ei| {
+                const target = for (input.tables, 0..) |candidate, index| {
+                    if (std.mem.eql(u8, candidate.name.text, endpoint.table.text)) break index;
+                } else return self.fail(.invalid_connection, endpoint.table.span, "Unknown connection endpoint table");
+                if (input.tables[target].connection != null)
+                    return self.fail(.unsupported_feature, endpoint.table.span, "Nested connection endpoints are unsupported");
+                endpoints[ei] = .{ .table_index = target, .role = if (endpoint.role) |role| try self.allocator.dupe(u8, role.text) else null };
+                var count: usize = 0;
+                for (connection.endpoints) |other| {
+                    if (std.mem.eql(u8, other.table.text, endpoint.table.text)) count += 1;
+                }
+                if (count == 1) for (tables[ti].columns, 0..) |column, ci| {
+                    if (column.primary_key != .none and @import("connection_validation.zig").matches(column, tables[target])) endpoints[ei].column_index = ci;
+                };
+            }
+            tables[ti].connection = .{ .endpoints = endpoints };
+        }
+        for (input.tables, 0..) |table, ti| {
+            if (table.connection) |connection| {
+                @import("connection_validation.zig").validate(.{ .tables = tables }, tables[ti]) catch
+                    return self.fail(.invalid_connection, connection.span, "Connection requires explicit nonnullable primary-key foreign keys matching its normal endpoints and unique roles for repeated tables");
+            }
+        }
         return .{ .tables = tables, .relationships = try self.relationships(input, tables) };
     }
 
@@ -469,6 +493,8 @@ const Context = struct {
                 const source = for (tables, 0..) |candidate, ti| {
                     if (std.mem.eql(u8, candidate.dsl_name, relationship.source_table.text)) break ti;
                 } else return self.fail(.unknown_relationship_source, relationship.source_table.span, "Unknown DSL table in relationship source");
+                if (tables[source].connection != null or tables[target].connection != null)
+                    return self.fail(.unsupported_connection_relationship, relationship.source_table.span, "Connection relationships are unsupported");
                 if (source != target)
                     return self.fail(.unsupported_connection_relationship, relationship.source_table.span, "Connection relationships are unsupported: direct source table must equal target table");
                 const backing = for (tables[source].columns, 0..) |column, ci| {

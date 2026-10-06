@@ -25,7 +25,7 @@ pub const Table = struct {
     checks: []const Expression = &.{},
 };
 
-/// Named connection metadata; endpoint binding is deferred to a later slice.
+/// Named connection metadata in header order, with owned exact roles.
 pub const Connection = struct {
     endpoints: []const Endpoint,
 };
@@ -33,7 +33,9 @@ pub const Connection = struct {
 pub const Endpoint = struct {
     table_index: usize,
     role: ?[]const u8 = null,
-    /// Local explicit FK column, when bound.
+    /// Unique-table endpoints bind their explicit PK FK column. Repeated-table
+    /// roles remain null: key names and declaration order do not imply bindings.
+    /// Public schemas may supply valid distinct explicit bindings.
     column_index: ?usize = null,
 };
 
