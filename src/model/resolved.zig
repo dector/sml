@@ -12,6 +12,11 @@ pub const Schema = struct {
     relationships: []const Relationship = &.{},
 };
 
+pub const Check = struct {
+    expression: Expression,
+    name: ?[]const u8 = null,
+};
+
 /// Stored tables, including expanded connection tables.
 pub const Table = struct {
     dsl_name: []const u8,
@@ -22,7 +27,7 @@ pub const Table = struct {
     unique_constraints: []const UniqueConstraint = &.{},
     indexes: []const Index = &.{},
     /// Explicit table checks in directive source order.
-    checks: []const Expression = &.{},
+    checks: []const Check = &.{},
 };
 
 /// Named metadata uses header order; unnamed metadata uses canonical DSL order.
@@ -121,7 +126,7 @@ pub const Column = struct {
     foreign_key: ?ForeignKey = null,
     default: ?Default = null,
     /// Explicit field checks in source order; builtin checks are emitted separately.
-    checks: []const Expression = &.{},
+    checks: []const Check = &.{},
     unique_constraints: []const UniqueConstraint = &.{},
 };
 

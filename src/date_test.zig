@@ -89,7 +89,7 @@ test "manual date predicate literal preflight without output" {
     const predicate: resolved.Expression = .{ .span = .{ .start = 0, .end = 3 }, .kind = .{ .binary = .{ .operator = .equal, .left = &left, .right = &right } }, .type_info = .{ .type = .boolean } };
     var sql = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer sql.deinit();
-    try std.testing.expectError(error.InvalidLiteral, emitter.emit(.{ .tables = &.{.{ .dsl_name = "T", .sql_name = "t", .columns = &.{.{ .dsl_name = "d", .sql_name = "d", .type = .date }}, .checks = &.{predicate} }} }, &sql.writer));
+    try std.testing.expectError(error.InvalidLiteral, emitter.emit(.{ .tables = &.{.{ .dsl_name = "T", .sql_name = "t", .columns = &.{.{ .dsl_name = "d", .sql_name = "d", .type = .date }}, .checks = &.{.{ .expression = predicate }} }} }, &sql.writer));
     try std.testing.expectEqualStrings("", sql.written());
 }
 

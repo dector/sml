@@ -66,8 +66,7 @@ fn rejectSyntax(source: []const u8, offending: []const u8, message: []const u8) 
 test "field check scope, docs, body options, terminators and EOF diagnostics" {
     try rejectSyntax("T {\n? true\n}\n", "?", "field scope");
     try rejectSyntax("T {\na int {\n?? true\n}\n}\n", "?", "Table checks");
-    try rejectSyntax("T {\na int {\n#check {\n}\n}\n}\n", "{", "Named check bodies");
-    try rejectSyntax("T {\na int {\n#check _ > 0 {\n}\n}\n}\n", "{", "Named check bodies");
+    try rejectSyntax("T {\na int {\n#check {\n}\n}\n}\n", "{", "Expected expression");
     try rejectSyntax("T {\na int {\n--- docs\n? _ > 0\n}\n}\n", "--- docs", "Unattached documentation");
     try rejectSyntax("T {\na int =\n  --- docs\n  #check _ > 0\n}\n", "--- docs", "Unattached documentation");
     try rejectSyntax("T {\na int {\n?", "", "expression");
@@ -136,7 +135,7 @@ test "schema emitter preflights every check before any SQL" {
         defer sql.deinit();
         try std.testing.expectError(case.err, emitter.emit(.{ .tables = &.{
             .{ .dsl_name = "ok", .sql_name = "ok" },
-            .{ .dsl_name = "T", .sql_name = "t", .columns = &.{.{ .dsl_name = "a", .sql_name = "a", .type = .integer, .checks = &.{case.expression} }} },
+            .{ .dsl_name = "T", .sql_name = "t", .columns = &.{.{ .dsl_name = "a", .sql_name = "a", .type = .integer, .checks = &.{.{ .expression = case.expression }} }} },
         } }, &sql.writer));
         try std.testing.expectEqualStrings("", sql.written());
     }

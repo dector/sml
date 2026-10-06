@@ -151,6 +151,8 @@ pub const Index = struct {
 };
 
 pub const Directive = struct {
+    /// Optional decoded-later constraint name, only valid on CHECK directives.
+    check_name: ?Token = null,
     kind: union(enum) {
         name: Token,
         /// Contextual action word; validated only during semantic resolution.

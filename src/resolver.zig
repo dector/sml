@@ -89,27 +89,31 @@ const Context = struct {
 
     fn options(self: *Context, directives: []const parsed.Directive, table: bool) Error!Options {
         var result: Options = .{};
-        for (directives) |directive| switch (directive.kind) {
-            .name => |token| {
-                if (result.name != null) return self.fail(.duplicate_directive, directive.span, "duplicate #name directive");
-                result.name = token;
-            },
-            .on_delete => {
-                if (table) return self.fail(.invalid_directive_scope, directive.span, "#onDelete requires a foreign-key field");
-            },
-            .check => {},
-            .native_unique, .index => {},
-            .unique => return self.fail(.invalid_directive_scope, directive.span, "#unique is index-option-only"),
-            .where => return self.fail(.invalid_directive_scope, directive.span, "#where is index-option-only"),
-            .of => {
-                if (table) return self.fail(.invalid_directive_scope, directive.span, "#of is field-only");
-            },
-            .allow_reuse => {
-                if (result.reuse != null) return self.fail(.duplicate_directive, directive.span, "duplicate #allow reuse directive");
-                if (table) return self.fail(.invalid_directive_scope, directive.span, "#allow reuse is field-only");
-                result.reuse = directive.span;
-            },
-        };
+        for (directives) |directive| {
+            if (directive.check_name != null and directive.kind != .check)
+                return self.fail(.invalid_directive_scope, directive.span, "Constraint name requires a CHECK directive");
+            switch (directive.kind) {
+                .name => |token| {
+                    if (result.name != null) return self.fail(.duplicate_directive, directive.span, "duplicate #name directive");
+                    result.name = token;
+                },
+                .on_delete => {
+                    if (table) return self.fail(.invalid_directive_scope, directive.span, "#onDelete requires a foreign-key field");
+                },
+                .check => {},
+                .native_unique, .index => {},
+                .unique => return self.fail(.invalid_directive_scope, directive.span, "#unique is index-option-only"),
+                .where => return self.fail(.invalid_directive_scope, directive.span, "#where is index-option-only"),
+                .of => {
+                    if (table) return self.fail(.invalid_directive_scope, directive.span, "#of is field-only");
+                },
+                .allow_reuse => {
+                    if (result.reuse != null) return self.fail(.duplicate_directive, directive.span, "duplicate #allow reuse directive");
+                    if (table) return self.fail(.invalid_directive_scope, directive.span, "#allow reuse is field-only");
+                    result.reuse = directive.span;
+                },
+            }
+        }
         return result;
     }
 
@@ -120,8 +124,8 @@ const Context = struct {
     fn name(self: *Context, token: parsed.Token, override: ?parsed.Token) Error![]const u8 {
         if (override) |exact| {
             const text = try self.backticks(exact);
-            if (text.len == 0 or std.mem.indexOfScalar(u8, text, 0) != null)
-                return self.fail(.invalid_identifier, exact.span, "SQL identifier must be nonempty and contain no NUL");
+            if (text.len == 0 or std.mem.indexOfScalar(u8, text, 0) != null or !std.unicode.utf8ValidateSlice(text))
+                return self.fail(.invalid_identifier, exact.span, "SQL identifier must be nonempty UTF-8 and contain no NUL");
             return self.allocator.dupe(u8, text);
         }
         if (token.text.len == 0 or std.mem.indexOfScalar(u8, token.text, 0) != null)
@@ -364,7 +368,7 @@ const Context = struct {
             tables[i].unique_constraints = try table_uniques.toOwnedSlice(self.allocator);
             // Metadata (including final SQL names) must exist before resolving `_`.
             for (table.fields, 0..) |field, j| {
-                var checks: std.ArrayList(resolved.Expression) = .empty;
+                var checks: std.ArrayList(resolved.Check) = .empty;
                 for (field.directives) |directive| {
                     if (directive.kind != .check) continue;
                     const result = try expression_resolver.resolveInto(self.allocator, directive.kind.check, .{ .table = tables[i], .field_index = j });
@@ -374,11 +378,11 @@ const Context = struct {
                     };
                     if (expression_resolver.validateCheckResult(&expression)) |d|
                         return self.fail(.invalid_check, d.span, d.message);
-                    try checks.append(self.allocator, expression);
+                    try checks.append(self.allocator, .{ .expression = expression, .name = if (directive.check_name) |name_token| try self.name(field.name, name_token) else null });
                 }
                 columns[j].checks = try checks.toOwnedSlice(self.allocator);
             }
-            var checks: std.ArrayList(resolved.Expression) = .empty;
+            var checks: std.ArrayList(resolved.Check) = .empty;
             for (table.directives) |directive| {
                 if (directive.kind != .check) continue;
                 const result = try expression_resolver.resolveInto(self.allocator, directive.kind.check, .{ .table = tables[i], .field_index = null });
@@ -388,9 +392,13 @@ const Context = struct {
                 };
                 if (expression_resolver.validateCheckResult(&expression)) |d|
                     return self.fail(.invalid_check, d.span, d.message);
-                try checks.append(self.allocator, expression);
+                try checks.append(self.allocator, .{ .expression = expression, .name = if (directive.check_name) |name_token| try self.name(table.name, name_token) else null });
             }
             tables[i].checks = try checks.toOwnedSlice(self.allocator);
+            @import("constraint_names.zig").validate(tables[i]) catch |err| switch (err) {
+                error.SqlNameCollision => return self.fail(.sql_name_collision, table.span, "Named constraints collide within table (ASCII case-insensitive)"),
+                error.InvalidIdentifier => return self.fail(.invalid_check, table.span, "Constraint names must be nonempty UTF-8 without NUL"),
+            };
         }
         // Resolve indexes only after all table/column names are final, including
         // later declarations. Constraint names are deliberately not global.

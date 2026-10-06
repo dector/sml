@@ -11,7 +11,7 @@ const manual: resolved.Schema = .{ .tables = &.{.{
         .dsl_name = "a",
         .sql_name = "a",
         .type = .boolean,
-        .checks = &.{.{ .span = span, .kind = .{ .raw_sql = "length('long trusted SQL string') > 0" } }},
+        .checks = &.{.{ .expression = .{ .span = span, .kind = .{ .raw_sql = "length('long trusted SQL string') > 0" } } }},
     }},
 }} };
 
@@ -55,7 +55,7 @@ test "cyclic manually built check is rejected before writing" {
     try std.testing.expectError(error.ExcessiveDepth, emitter.emit(.{ .tables = &.{.{
         .dsl_name = "T",
         .sql_name = "t",
-        .columns = &.{.{ .dsl_name = "a", .sql_name = "a", .type = .boolean, .checks = &.{expression} }},
+        .columns = &.{.{ .dsl_name = "a", .sql_name = "a", .type = .boolean, .checks = &.{.{ .expression = expression }} }},
     }} }, &sql.writer));
     try std.testing.expectEqualStrings("", sql.written());
 }

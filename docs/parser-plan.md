@@ -1,5 +1,20 @@
 # Parser plan
 
+Slice1 named CHECK constraints are implemented. Field/table `#check expr`,
+`? expr` and `?? expr` accept optional same-line braces using the native UNIQUE
+options parser: empty `{}` or a multiline body with exactly one `#name` literal.
+Unknown/nested options, duplicate arguments and docs attachments are rejected.
+The expression stream stops before the opening brace, including grouped roots.
+Parsed directives retain an optional name token; resolved checks own
+`Check { expression, name }` wrappers in the schema arena. All expressions and
+nonempty UTF-8/NUL-free names are preflighted before output. Named UNIQUE and
+CHECK share an ASCII-case-insensitive table-local namespace across field/table
+scope; builtin checks stay unnamed. Names emit safely quoted CONSTRAINT labels
+and SQLite INSERT/UPDATE errors expose the exact label. Tests cover forward
+references, nullable UNKNOWN, NULL rewrites, trusted raw SQL, quoting, namespace
+collisions and full-pipeline allocation failures (`src/named_check_test.zig`,
+`named_checks.pzl`/SQL and `src/testdata/named_check_runtime_test.py`).
+
 Status: the first supported parser milestone (stages 1–4) is implemented and
 covered by tokenizer, parser, allocation-failure, and source-to-SQL tests.
 Stage 5 is partially implemented, including partial indexes, stored FKs,
@@ -45,8 +60,8 @@ output. WHERE follows the quoted indexed columns; combined #unique applies only
 to matching rows without rewriting native uniqueness or distinct NULL behavior.
 SQLite disallows nondeterministic functions, subqueries and bound parameters;
 trusted raw SQL restrictions are not statically evaluated.
-`unique(nulls: equal)`, named expression CHECK bodies, and expression-index
-columns remain deferred; expression-index grammar is unsettled. Native UNIQUE
+`unique(nulls: equal)` and expression-index columns remain deferred;
+expression-index grammar is unsettled. Native UNIQUE and expression CHECK
 constraint `#name` bodies are supported as described above. Unsupported syntax
 is diagnosed rather than ignored.
 See [the language design](design-v1.md) for broader v1 scope.
@@ -128,12 +143,12 @@ Resolution waits for column metadata and final SQL names, then resolves each
 check in field scope: `_` is the current field only; identifiers are forbidden.
 Backtick raw SQL is trusted and may refer to other SQL names without placeholder
 rewriting. Boolean (including nullable Boolean) or raw-SQL roots are required.
-Resolved columns own an ordered `checks` expression array in the schema arena.
+Resolved columns own an ordered `checks` Check wrapper array in the schema arena.
 The emitter preflights all expressions and roots before any SQL; explicit checks
 follow builtin enum/bool/date/datetime checks and preserve their source order.
 `_ != null` emits `IS NOT NULL`; ordinary nullable comparisons retain SQL UNKNOWN.
-Named expression CHECK bodies remain unsupported; native UNIQUE constraint
-names are supported, not expression CHECK labels.
+Named expression CHECK bodies and native UNIQUE constraint names are supported
+as described in Slice1 above.
 Tests: `src/check_test.zig`, `src/check_extra_test.zig`, `checks.pzl`/SQL fixture,
 and `src/testdata/check_runtime_test.py`.
 
@@ -145,7 +160,7 @@ DSL names resolve to final SQL names (including quoted `#name` overrides),
 forward references work, and `_` is invalid. The same Boolean/raw-SQL root,
 logical datatype, canonical date/UTC datetime, and null semantics apply as for fields.
 Single table `?` and field `??` fail with marker-span diagnostics. Docs cannot
-attach to checks. `resolved.Table.checks` owns ordered expressions; emission
+attach to checks. `resolved.Table.checks` owns ordered Check wrappers; emission
 preflights every check before writing, then emits table CHECK items after columns
 and any composite primary key with proper commas. Zero-column tables, including
 literal checks-only tables, retain the existing non-executable skeleton policy;
@@ -419,9 +434,10 @@ Extend syntax models, parser, resolver, emitter, and tests together:
 
 1. Date and inline enums are complete. JSON and additional generators remain
    unsupported; reusable types remain deferred indefinitely.
-2. Nulls-equal and named expression CHECK bodies (ordinary/unique/partial indexes,
-   composite uniqueness, expression precedence, field checks, and table checks
-   are implemented; expression-index columns remain deferred pending grammar).
+2. Nulls-equal remains deferred. Named expression CHECK bodies,
+   ordinary/unique/partial indexes, composite uniqueness, expression precedence,
+   field checks, and table checks are implemented; expression-index columns
+   remain deferred pending grammar.
 3. Stored FKs, automatic FK indexes, and direct virtual relationships are implemented.
 4. NamedConnections Slice2 implements named connections, roles, and explicit
    composite PK FK keys. Endpoint target multisets are validated by a shared

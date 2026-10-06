@@ -44,6 +44,7 @@ test {
     _ = @import("date_test.zig");
     _ = @import("enum_test.zig");
     _ = @import("check_test.zig");
+    _ = @import("named_check_test.zig");
     _ = @import("unique_test.zig");
     _ = @import("index_test.zig");
     _ = @import("partial_index_test.zig");

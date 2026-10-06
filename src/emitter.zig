@@ -66,8 +66,8 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
             };
         }
         for (table.checks) |check| {
-            try expression_emitter.preflight(check);
-            if (@import("expression_resolver.zig").validateCheckResult(&check) != null) return error.InvalidCheck;
+            try expression_emitter.preflight(check.expression);
+            if (@import("expression_resolver.zig").validateCheckResult(&check.expression) != null) return error.InvalidCheck;
         }
         for (table.columns, 0..) |column, column_index| {
             if (column.foreign_key) |fk| try validateForeignKey(schema, column, fk);
@@ -98,8 +98,8 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
                 if (!@import("enumeration.zig").valid(column.enum_values)) return error.InvalidEnum;
             } else if (column.enum_values.len != 0) return error.InvalidEnum;
             for (column.checks) |check| {
-                try expression_emitter.preflight(check);
-                if (@import("expression_resolver.zig").validateCheckResult(&check) != null) return error.InvalidCheck;
+                try expression_emitter.preflight(check.expression);
+                if (@import("expression_resolver.zig").validateCheckResult(&check.expression) != null) return error.InvalidCheck;
             }
             if (column.default) |value| {
                 if (column.foreign_key == null and column.primary_key != .none and key_count == 1 and column.type == .integer)
@@ -109,6 +109,7 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
         }
     }
 
+    for (schema.tables) |table| try @import("constraint_names.zig").validate(table);
     try writer.writeAll("PRAGMA foreign_keys = ON;\n");
     for (schema.tables) |table| {
         const key_count = primaryKeyCount(table);
@@ -166,8 +167,12 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
                 }
             }
             for (column.checks) |check| {
+                if (check.name) |name| {
+                    try writer.writeAll(" CONSTRAINT ");
+                    try writeIdentifier(writer, name);
+                }
                 try writer.writeAll(" CHECK (");
-                try expression_emitter.emit(check, writer);
+                try expression_emitter.emit(check.expression, writer);
                 try writer.writeByte(')');
             }
             for (column.unique_constraints) |unique| {
@@ -205,8 +210,14 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
             try writer.writeByte('\n');
         }
         for (table.checks, 0..) |check, index| {
-            try writer.writeAll("  CHECK (");
-            try expression_emitter.emit(check, writer);
+            try writer.writeAll("  ");
+            if (check.name) |name| {
+                try writer.writeAll("CONSTRAINT ");
+                try writeIdentifier(writer, name);
+                try writer.writeByte(' ');
+            }
+            try writer.writeAll("CHECK (");
+            try expression_emitter.emit(check.expression, writer);
             try writer.writeByte(')');
             if (index + 1 < table.checks.len or table.unique_constraints.len > 0) try writer.writeByte(',');
             try writer.writeByte('\n');

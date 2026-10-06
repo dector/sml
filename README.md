@@ -52,6 +52,24 @@ overrides, and can target fields declared later; `_` is invalid in table scope.
 Single `?` is field-only; `??` is table-only. Table checks emit after columns and
 any composite primary key, in check source order. Empty tables (including
 checks-only tables) remain non-executable SQL skeletons.
+Explicit field/table checks support an optional same-line brace body:
+
+```text
+#check (_ > 0) {
+  #name `positive value`
+}
+```
+
+The same options work on `? expr` / `?? expr`; empty `{}` is allowed.
+Nonempty bodies are multiline and accept only one `#name` backtick/hash-backtick
+literal. The expression is required. Names are exact nonempty UTF-8 without NUL,
+safely quoted as `CONSTRAINT "positive value" CHECK (...)`. Named CHECK and UNIQUE
+constraints share one ASCII-case-insensitive table-local namespace, independent
+of parent field/table `#name` and SQL index names. Builtin checks remain unnamed.
+SQLite INSERT/UPDATE failures report `CHECK constraint failed: positive value`.
+Naming does not alter Boolean validation, trusted raw SQL, NULL rewrites, or
+nullable UNKNOWN acceptance. Names are supported only for stored field/table
+constraints, not virtual relationships or defaults.
 Docs cannot target checks or unique constraints. Single-field `? unique` and
 `#check unique` emit SQLite column `UNIQUE` constraints, after defaults/checks.
 Optional same-line `{}` or multiline braces accept only `#name` backtick SQL
@@ -64,8 +82,8 @@ references and SQL `#name` overrides. SQL preserves the field list order.
 Repeated fields, duplicate field sets (even reversed or field/table singletons),
 and duplicate options are diagnosed. Table constraints follow PKs/checks.
 Plain uniqueness allows multiple NULLs, including composite NULL components.
-`unique(nulls: equal)` and named expression CHECK bodies remain explicitly
-deferred; the `#name` bodies above name native UNIQUE constraints, not CHECKs.
+`unique(nulls: equal)` remains explicitly deferred. The same `#name` option
+body names either a native UNIQUE constraint or an expression CHECK.
 
 Indexes support field `#index` (no arguments) and table
 `#index fieldA, fieldB` (one or more DSL names, no trailing comma).

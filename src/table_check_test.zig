@@ -31,8 +31,8 @@ fn pipeline(allocator: std.mem.Allocator) !void {
     defer semantic.schema.deinit();
     const table = semantic.schema.schema.tables[0];
     try std.testing.expectEqual(@as(usize, 3), table.checks.len);
-    try std.testing.expectEqualStrings("low\"value", table.checks[0].kind.binary.left.kind.identifier.sql_name);
-    try std.testing.expect(table.checks[0].type_info.?.nullable);
+    try std.testing.expectEqualStrings("low\"value", table.checks[0].expression.kind.binary.left.kind.identifier.sql_name);
+    try std.testing.expect(table.checks[0].expression.type_info.?.nullable);
     try std.testing.expectEqual(@as(usize, 1), table.columns[2].checks.len);
     var sql = std.Io.Writer.Allocating.init(allocator);
     defer sql.deinit();
@@ -59,9 +59,7 @@ test "table check syntax diagnostics have exact spans" {
         .{ .source = "T {\na int =\n  ?? true\n}\n", .offending = "?", .message = "table scope" },
         .{ .source = "T {\n--- docs\n?? true\n}\n", .offending = "--- docs", .message = "Unattached documentation" },
         .{ .source = "T {\n--- docs\n#check true\n}\n", .offending = "--- docs", .message = "Unattached documentation" },
-        .{ .source = "T {\n#check {\n}\n", .offending = "{", .message = "Named check bodies" },
-        .{ .source = "T {\n#check named {\n}\n", .offending = "{", .message = "Named check bodies" },
-        .{ .source = "T {\n?? true {\n}\n", .offending = "{", .message = "Named check bodies" },
+        .{ .source = "T {\n#check {\n}\n", .offending = "{", .message = "Expected expression" },
         .{ .source = "T {\n??", .offending = "", .message = "expression" },
         .{ .source = "T {\n#check", .offending = "", .message = "expression" },
         .{ .source = "T {\n?? (true &&", .offending = "", .message = "expression" },
@@ -159,7 +157,7 @@ test "table checks preflight before any writer output" {
         defer sql.deinit();
         try std.testing.expectError(case.err, emitter.emit(.{ .tables = &.{
             .{ .dsl_name = "ok", .sql_name = "ok" },
-            .{ .dsl_name = "T", .sql_name = "t", .checks = &.{case.expression} },
+            .{ .dsl_name = "T", .sql_name = "t", .checks = &.{.{ .expression = case.expression }} },
         } }, &sql.writer));
         try std.testing.expectEqualStrings("", sql.written());
     }

@@ -463,6 +463,11 @@ const Parser = struct {
             }
             end = (try self.take(.r_paren, "Expected ')' after unique fields")).span.end;
         } else if (!field_scope) return self.fail(self.current.span, "Table uniqueness requires a nonempty field list");
+        const options = try self.constraintOptions(&end, "unique");
+        return .{ .kind = .{ .native_unique = .{ .fields = try fields.toOwnedSlice(self.allocator), .options = options } }, .span = .{ .start = start, .end = end } };
+    }
+
+    fn constraintOptions(self: *Parser, end: *usize, comptime context: []const u8) Error![]const parsed.Directive {
         var options: std.ArrayList(parsed.Directive) = .empty;
         if (self.current.kind == .l_brace) {
             try self.advance();
@@ -471,20 +476,20 @@ const Parser = struct {
                 while (true) {
                     try self.noDocs(try self.trivia());
                     if (self.current.kind == .r_brace) break;
-                    if (self.current.kind == .eof) return self.fail(self.current.span, "Expected '}' to close unique options");
-                    if (self.current.kind != .hash) return self.fail(self.current.span, "Unique options require #name backtick");
+                    if (self.current.kind == .eof) return self.fail(self.current.span, "Expected '}' to close " ++ context ++ " options");
+                    if (self.current.kind != .hash) return self.fail(self.current.span, "Constraint options require #name backtick");
                     const hash = self.current;
                     try self.advance();
-                    if (!self.word("name")) return self.fail(self.current.span, "Only #name is supported in unique options");
+                    if (!self.word("name")) return self.fail(self.current.span, "Only #name is supported in " ++ context ++ " options");
                     try self.advance();
                     const value = try self.take(.backtick, "#name requires a backtick literal");
                     try options.append(self.allocator, .{ .kind = .{ .name = token(value) }, .span = .{ .start = hash.span.start, .end = value.span.end } });
                     try self.lineEnd();
                 }
             }
-            end = (try self.take(.r_brace, "Expected '}' to close unique options")).span.end;
+            end.* = (try self.take(.r_brace, "Expected '}' to close " ++ context ++ " options")).span.end;
         }
-        return .{ .kind = .{ .native_unique = .{ .fields = try fields.toOwnedSlice(self.allocator), .options = try options.toOwnedSlice(self.allocator) } }, .span = .{ .start = start, .end = end } };
+        return try options.toOwnedSlice(self.allocator);
     }
 
     fn check(self: *Parser, start: usize, field_scope: bool) Error!parsed.Directive {
@@ -497,8 +502,10 @@ const Parser = struct {
             };
         }
         const value = try self.parseExpression();
-        if (self.current.kind == .l_brace) return self.fail(self.current.span, "Named check bodies are not supported yet; use #check expr");
-        return .{ .kind = .{ .check = value }, .span = .{ .start = start, .end = value.span.end } };
+        var end = value.span.end;
+        const options = try self.constraintOptions(&end, "check");
+        if (options.len > 1) return self.fail(options[1].span, "duplicate #name in check options; only one argument is allowed");
+        return .{ .kind = .{ .check = value }, .check_name = if (options.len == 1) options[0].kind.name else null, .span = .{ .start = start, .end = end } };
     }
 
     fn parseExpression(self: *Parser) Error!parsed.Expression {
@@ -534,7 +541,7 @@ const Parser = struct {
         if (self.word("index")) return self.index(hash.span.start, field_scope);
         if (self.word("check")) {
             try self.advance();
-            if (self.current.kind == .l_brace) return self.fail(self.current.span, "Named check bodies are not supported yet; use #check expr");
+            if (self.current.kind == .l_brace) return self.fail(self.current.span, "Expected expression before check options");
             return self.check(hash.span.start, field_scope);
         }
         if (self.word("name")) {

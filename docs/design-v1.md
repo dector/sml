@@ -29,10 +29,10 @@ design does not imply implemented syntax.
 - Named role/self/multi-endpoint connections support explicit and generated keys.
   Unnamed roles/self/multi-endpoint connections are implemented; nested endpoints remain deferred.
 - Current types: `int`, `real`, `str`, `blob`, `bool`, `date`, `datetime`, inline `enum`.
-  Expressions, field/table checks, named native UNIQUE constraints, ordinary/unique/
-  partial indexes, and FK/backref resolution are implemented.
-- JSON, update generators, timezone companions, named expression CHECK bodies,
-  nulls-equal uniqueness, arithmetic, and expression-index columns are unsupported.
+  Expressions, field/table checks, named native UNIQUE and CHECK constraints,
+  ordinary/unique/partial indexes, and FK/backref resolution are implemented.
+- JSON, update generators, timezone companions, nulls-equal uniqueness,
+  arithmetic, and expression-index columns are unsupported.
 - No custom SQLite runtime functions required by generated constraints.
 
 Older SQLite versions are not a supported v1 target. Documentation can explain
@@ -884,9 +884,19 @@ is deferred. Slice15 supports field and table uniqueness. Fields emit column
 `[CONSTRAINT quoted_name] UNIQUE (quoted_columns)` after PKs/checks, not SQL `CHECK`.
 Options use braces opened on the constraint line (including empty `{}`), never
 `=`; nonempty bodies are multiline. Only `#name` is accepted; duplicate names
-and duplicate field uniqueness are errors. Named expression CHECK bodies are
-unsupported; these names apply only to native UNIQUE constraints.
-Names must be nonempty with no NUL, are safely quoted verbatim, and must be
+and duplicate field uniqueness are errors. Slice1 named CHECK is implemented:
+`#check expr {`, `? expr {` and table `?? expr {` accept the same optional
+multiline `#name` body (empty `{}` is allowed). The expression is required;
+only one name argument is accepted. Grouped expressions stop before the body.
+Names apply only to stored field/table constraints, never defaults or virtuals.
+Checks emit `CONSTRAINT quoted_name CHECK (expr)` and share the native UNIQUE
+namespace across fields and table constraints. Builtin/inherited enum, Boolean,
+date and datetime checks remain unnamed. SQLite INSERT/UPDATE errors include
+`CHECK constraint failed: name`; spaces and quotes are preserved safely.
+Naming leaves raw SQL trust, Boolean validation, NULL rewriting and nullable
+UNKNOWN acceptance unchanged. Schema emission validates all check expressions
+and names before writing any SQL.
+Names must be nonempty UTF-8 with no NUL, are safely quoted verbatim, and must be
 ASCII-case-insensitively distinct within the table. These labels are not index
 object names. Documentation cannot target individual constraints.
 `unique` is contextual: `? unique == 'x'` remains an ordinary identifier
