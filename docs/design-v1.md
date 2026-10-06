@@ -1276,9 +1276,35 @@ metadata only, not composite PK order. Endpoint keys have no automatic prefill
 or ID generation. Payload defaults/checks/uniqueness
 and FK deletion actions work exactly as in ordinary tables. The first PK column
 covers its FK lookup; other uncovered FKs receive ordinary indexes.
-Nested endpoints remain deferred. Named generated keys and same-DSL-name overrides
-are implemented, as are explicit unnamed role/self/multi-endpoint connections
-and exact-pair shorthand. Nested endpoints remain deferred.
+Named generated keys and same-DSL-name overrides are implemented, as are explicit
+unnamed role/self/multi-endpoint connections and exact-pair shorthand.
+
+#### Unsupported: connection tables as endpoints
+
+A **nested connection** uses another connection table as an endpoint:
+
+```text
+~Authorship(Author, Book) {
+  ~~
+}
+
+~Credit(Authorship, Organization) {
+  ~~
+}
+```
+
+`Credit` would connect an author–book pairing to an organization, not just an
+author or a book. Connection tables usually have composite keys; referencing the
+whole pairing needs composite-FK rules we have not designed. Nested connection
+endpoints are therefore unsupported, even if a connection declares a single key.
+This applies to named and unnamed connections, explicit keys and `~~`, regardless
+of declaration order. Resolution reports `unsupported_feature` at the connection
+endpoint name before FK type resolution. Public resolved schemas also reject
+connection endpoints with `InvalidConnection` before any SQL output.
+
+This does **not** mean relationship fields inside relationships or nested braces.
+The restriction is about the table referenced by a connection header endpoint;
+existing relationship and brace rules are unchanged.
 
 ```text
 Author {

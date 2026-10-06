@@ -21,6 +21,19 @@ fn part(ctx: anytype, out: *std.ArrayList(u8), text: []const u8, pascal: bool, s
 }
 
 pub fn expand(ctx: anytype, source: parsed.Schema) @TypeOf(ctx.*).Error!parsed.Schema {
+    // Reject connection-as-endpoint before generating keys or inheriting FK types.
+    // Otherwise explicit keys can hide this error behind a composite-FK diagnostic.
+    for (source.tables) |table| {
+        const connection = table.connection orelse continue;
+        for (connection.endpoints) |endpoint| {
+            for (source.tables) |candidate| {
+                if (!std.mem.eql(u8, candidate.name.text, endpoint.table.text)) continue;
+                if (candidate.connection != null)
+                    return ctx.fail(.unsupported_feature, endpoint.table.span, "Nested connection endpoints are unsupported");
+                break;
+            }
+        }
+    }
     const needed = needed: for (source.tables) |table| {
         if (table.connection) |connection| if (connection.unnamed or connection.generated_keys_span != null) break :needed true;
         for (table.relationships) |relationship| if (relationship.source_implicit) break :needed true;
@@ -73,7 +86,6 @@ pub fn expand(ctx: anytype, source: parsed.Schema) @TypeOf(ctx.*).Error!parsed.S
             const parent = for (source.tables) |candidate| {
                 if (std.mem.eql(u8, candidate.name.text, endpoint.table.text)) break candidate;
             } else return ctx.fail(.invalid_connection, endpoint.table.span, "Unknown connection endpoint table");
-            if (parent.connection != null) return ctx.fail(.unsupported_feature, endpoint.table.span, "Nested connection endpoints are unsupported");
             var key: ?parsed.Field = null;
             for (parent.fields) |field| if (field.primary_key) {
                 if (key != null) return ctx.fail(.invalid_connection, endpoint.span, "Generated connection endpoint requires exactly one declared primary key");

@@ -1,5 +1,13 @@
 # Parser plan
 
+Connection tables cannot be connection endpoints. Resolution rejects named and
+unnamed nested connections before key generation or FK type resolution, so both
+explicit keys and `~~` report `unsupported_feature` at the endpoint name,
+including forward references. Public resolved-schema validation rejects them
+before SQL output. This is a connection-as-endpoint restriction, not a ban on
+relationship mappings or nested braces. Composite-FK semantics remain undesigned.
+Coverage: `src/nested_connection_test.zig`.
+
 Slice1 named CHECK constraints are implemented. Field/table `#check expr`,
 `? expr` and `?? expr` accept optional same-line braces using the native UNIQUE
 options parser: empty `{}` or a multiline body with exactly one `#name` literal.

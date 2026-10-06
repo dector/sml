@@ -118,7 +118,7 @@ test "invalid connection headers and unsupported forms have exact diagnostic spa
 
 fn allocatedConnections(allocator: std.mem.Allocator) !void {
     // Arena payload remains usable across unrelated parses; tokens still borrow source.
-    const source = "--- Joined\n--- docs\n~C(a A, B, c C) {\n*!a A\n*!b B\n*!c C\n}\n";
+    const source = "--- Joined\n--- docs\n~C(a A, B, c D) {\n*!a A\n*!b B\n*!c D\n}\n";
     var first = try parser.parse(allocator, source);
     try std.testing.expect(first == .schema);
     defer first.schema.deinit();

@@ -303,7 +303,26 @@ must be supplied on insert: there is
 no automatic prefill or ID generation for connection keys. Payload defaults,
 checks, uniqueness, indexes, and FK deletion policies behave like ordinary tables.
 The PK covers reverse FK lookups only for its first key; remaining uncovered FKs
-receive ordinary indexes. Nested endpoints remain deferred.
+receive ordinary indexes.
+
+A **nested connection** uses another connection table as an endpoint:
+
+```text
+~Authorship(Author, Book) {
+  ~~
+}
+
+~Credit(Authorship, Organization) {
+  ~~
+}
+```
+
+Here, `Credit` connects an author–book pairing to an organization, not just an
+author or a book. This is unsupported: connection tables usually have composite
+keys, and referencing the whole pairing needs composite-FK rules we have not
+designed. Named and unnamed connections reject connection endpoints with either
+explicit keys or `~~`, including forward references. This restriction concerns
+endpoint tables, not relationship fields or nested braces.
 
 Named `~~` generation is supported end to end. It expands before field/type
 resolution without changing parsed source fields or documentation. Generated
