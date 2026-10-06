@@ -419,8 +419,12 @@ Extend syntax models, parser, resolver, emitter, and tests together:
    inferred; shared resolver/emitter validation rejects incomplete public metadata
    before SQL output. Direct destination hints are invalid. Tests cover forward
    names, SQL overrides, ambiguity, spans, whole-model preflight, runtime tuple
-   semantics, and allocation failures. Nested endpoints, unnamed connections,
-   and `~~` generated keys remain deferred.
+   semantics, and allocation failures. Slice4 adds byte-identical SQL comparisons
+   with ordinary explicit FK tables, owned metadata after source/parsed teardown,
+   full parse→resolve→emit OOM coverage, and runtime payload/default/constraint,
+   custom-name deletion, explicit-key omission, and reverse-index coverage checks.
+   Header order is never a generated-key ordering rule; keys are not prefilled.
+   Nested endpoints, unnamed connections, and `~~` generated keys remain deferred.
 5. Remaining directives and multiline literals after their rules are finalized.
 
 Do not build a full-v1 parser ahead of models and semantic support.

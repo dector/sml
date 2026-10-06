@@ -20,10 +20,11 @@ these syntax decisions require implementation updates, not just resolver changes
 - Fresh-schema creation, not migrations.
 - Stored foreign-key syntax, target/type resolution, SQL emission, and deletion
   actions, shared-PK identity, and automatic ordinary FK indexes are implemented
-  (StoredFK Slice6). Backrefs and generated connection tables remain planned.
+  (StoredFK Slice6). Direct backrefs and named explicit-key connections with
+  virtual endpoint relationships are implemented. Generated connections remain planned.
 - Inline enums are implemented. Reusable types (including named enums) are
   deferred indefinitely; their examples below are design sketches, not supported syntax.
-- Role-named and multi-endpoint connections are included toward the end of v1.
+- Role-named and multi-endpoint connections support explicit keys (NamedConnections Slice4).
 - No custom SQLite runtime functions required by generated constraints.
 
 Older SQLite versions are not a supported v1 target. Documentation can explain
@@ -965,8 +966,9 @@ with ON DELETE RESTRICT (default), CASCADE, or SET NULL. Field `#onDelete`
 accepts only restrict/cascade/setNull; duplicates, unknown actions, and table or
 non-FK scope are diagnosed. setNull requires local nullability, also enforced by
 emitter preflight before writing output. `#onUpdate` is unsupported. Automatic
-FK indexes are implemented in StoredFK Slice6; backrefs and connection tables
-remain design, not implemented behavior.
+FK indexes are implemented in StoredFK Slice6, including named explicit-key
+connection tables. Direct backrefs and named connection mappings are implemented;
+unnamed/generated connections remain future design.
 
 ```text
 Book {
@@ -1208,32 +1210,50 @@ explicit roles. Their resolved `column_index` stays null: arbitrary explicit key
 names and declaration order do not establish role bindings. Unique-table
 endpoints bind their single matching key. Public resolved schemas may provide
 distinct valid bindings; SQL validates all connection metadata before output.
-Nested endpoints and relationships through connections are deferred. Unnamed
-connections and `~~` below describe future design, not current support.
+**Implemented (NamedConnections Slice3–4):** relationships through named explicit
+connections use `~name Target[] @Connection.source [<<destination]` (or `Target?`
+when the source alone is globally unique). Source and destination are exact stored
+DSL fields, never role labels or SQL aliases. Infer a destination only when one
+other endpoint key targets the declared table; ambiguity needs an explicit hint.
+Self-connections use distinct fields without guessing role bindings. Metadata owns
+relationship names, documentation/spans, and destination indices after input and
+parsed storage are freed. Virtual relationship documentation emits no SQL.
+Collections preserve tuples: no generated queries, implicit deduplication, or sort.
+Header order preserves endpoint metadata only, not composite PK order. Endpoint
+keys have no automatic prefill or ID generation. Payload defaults/checks/uniqueness
+and FK deletion actions work exactly as in ordinary tables. The first PK column
+covers its FK lookup; other uncovered FKs receive ordinary indexes.
+Nested endpoints remain deferred. Unnamed connections and generated-key sections
+below describe future design, not current support.
 
 ```text
-~Authorship(Author, Book) {
-  ~~
-  position int(0)
+Author {
+  !id int
+  ~writtenBooks Book[] @Authorship.writerKey
+  ~translatedBooks Book[] @Translation.personKey
 }
-
+Book {
+  !id str
+}
+~Authorship(writer Author, publication Book) {
+  *!publicationKey Book
+  position int(0)
+  *!writerKey Author
+}
 ~Translation(Author, Book) {
-  ~~
+  *!personKey Author
+  *!workKey Book
   language str
 }
 ```
 
-References:
+Names distinguish multiple relationships between the same tables. SQL names
+default to `authorship` and `translation`; `#name` can override them. Authorship's
+PK is `(publicationKey, writerKey)` despite the opposite header order. No key
+names are generated or inferred. See README for complete explicit self-role and
+multi-endpoint examples with destination hints.
 
-```text
-~writtenBooks Book[] @Authorship.authorId
-~translatedBooks Book[] @Translation.authorId
-```
-
-Names distinguish multiple relationships between the same tables. The generated
-SQL names default to `authorship` and `translation`; `#name` can override them.
-
-### Customize generated fields
+### Customize generated fields (future design)
 
 ```text
 ~Authorship(Author, Book) {
@@ -1272,9 +1292,9 @@ Connection identity being order-independent does not make composite index order
 irrelevant. **Open detail:** define one consistent generated key ordering rule;
 the conversation did not choose the exact canonical ordering algorithm.
 
-### Role names
+### Role names (future generated-key design)
 
-Roles customize generated DSL key names:
+In the future generated-key design, roles customize generated DSL key names:
 
 ```text
 ~Authorship(writer Author, publication Book) {
@@ -1288,7 +1308,8 @@ Generates `writerId` and `publicationId`, rather than `authorId` and `bookId`.
 
 ```text
 ~Following(follower Reader, followed Reader) {
-  ~~
+  *!followerId Reader
+  *!followedId Reader
   createdAt datetime(::now)
 }
 
@@ -1299,7 +1320,8 @@ Reader {
 }
 ```
 
-Roles resolve the otherwise duplicate `readerId` keys. The mapped field is the
+Roles distinguish repeated header tables but do not bind explicit keys. The key
+names here are authored, not generated from roles. The mapped field is the
 current reader's side; the other endpoint supplies related readers.
 
 ### More than two endpoints
@@ -1308,17 +1330,14 @@ Connections can have two or more endpoints:
 
 ```text
 ~Permission(user User, resource Resource, role Role) {
-  ~~
+  *!userId User
+  *!resourceId Resource
+  *!roleId Role
 }
 ```
 
-Generates:
-
-```text
-*!userId User
-*!resourceId Resource
-*!roleId Role
-```
+`User`, `Resource`, and `Role` must be normal tables with a single PK. Every key
+above is explicit; header roles do not create fields.
 
 The triple forms one composite primary key. The same user/resource pair can
 occur with multiple roles.
@@ -1330,7 +1349,9 @@ require `<<destinationField`:
 
 ```text
 ~ReviewAssignment(author Reader, reviewer Reader, approver Reader) {
-  ~~
+  *!authorId Reader
+  *!reviewerId Reader
+  *!approverId Reader
 }
 
 Reader {

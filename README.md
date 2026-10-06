@@ -194,8 +194,52 @@ Collections preserve connection tuples: there is no implicit deduplication or
 ordering. Nullable singular mappings require the source key alone to be globally
 unique (single-column PK/UNIQUE/full unique index); a composite connection PK
 alone does not suffice. The destination FK already identifies one target record.
-All relationships remain virtual and emit no SQL. Nested endpoints, unnamed
-connections, and `~~` generated keys remain deferred.
+All relationships remain virtual and emit no SQL, including their documentation.
+NamedConnections Slice4 exercises the complete explicit-key pipeline and SQLite
+runtime behavior; it adds no generated features. Header endpoint order is metadata
+order, **not key order**. Every endpoint key must be supplied on insert: there is
+no automatic prefill or ID generation for connection keys. Payload defaults,
+checks, uniqueness, indexes, and FK deletion policies behave like ordinary tables.
+The PK covers reverse FK lookups only for its first key; remaining uncovered FKs
+receive ordinary indexes. Nested endpoints, unnamed connections, and `~~`
+generated keys remain deferred.
+
+Complete explicit-key example (forward mappings are allowed):
+
+```text
+Reader {
+  !id real
+  ~books Book[] @Borrow._sourceId
+  ~following Reader[] @Following.leftKey
+  ~peers Reader[] @Trio.first <<second
+}
+Book {
+  !id str
+}
+~Borrow(person Reader, publication Book) {
+  *!bookKey Book
+  position int(0)
+  *!_sourceId Reader {
+    #onDelete cascade
+  }
+}
+~Following(follower Reader, followed Reader) {
+  *!leftKey Reader
+  *!rightKey Reader
+}
+~Trio(actor Reader, peer Reader, context Reader) {
+  *!third Reader
+  *!second Reader
+  *!first Reader
+}
+```
+
+`Borrow` has PK `(bookKey, _sourceId)`, not header order. `Following` infers
+`rightKey`; `Trio` needs `<<second` because two other keys target `Reader`.
+Its PK remains `(third, second, first)`. Repeated-table roles remain unbound
+(`column_index = null`); relationship destination indices are independently
+resolved from explicit fields. These declarations generate stored tables and FK
+indexes, not relationship queries, deduplication, or sorting.
 
 Read `result.schema.schema.relationships` after resolution. Each entry has an
 owned `dsl_name`, declaration/documentation spans, optional documentation text,
