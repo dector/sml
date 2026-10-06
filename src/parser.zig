@@ -133,13 +133,21 @@ const Parser = struct {
         const is_connection = self.current.kind == .tilde;
         if (is_connection) {
             try self.advance();
-            if (self.current.kind == .l_paren)
-                return self.fail(.{ .start = start, .end = self.current.span.end }, "Unnamed connection table declarations are unsupported");
             if (self.current.kind == .tilde)
                 return self.fail(.{ .start = start, .end = self.current.span.end }, "Generated connection keys require a named connection body");
         }
-        const first = try self.name();
+        const unnamed = is_connection and self.current.kind == .l_paren;
+        const first: ?Token = if (unnamed) null else try self.name();
         var connection: ?parsed.Connection = if (is_connection) try self.connectionHeader(start) else null;
+        const table_name: parsed.Token = if (unnamed) blk: {
+            const header = &connection.?;
+            if (header.endpoints.len != 2 or header.endpoints[0].role != null or header.endpoints[1].role != null)
+                return self.fail(header.span, "Unnamed connections support exactly two distinct unroled endpoints");
+            const identity = @import("connection_identity.zig").canonicalKey(header.endpoints[0].table.text, header.endpoints[1].table.text) catch
+                return self.fail(header.span, "Unnamed connections support exactly two distinct unroled endpoints");
+            header.unnamed = true;
+            break :blk .{ .text = try identity.declarationName(self.allocator), .span = header.span };
+        } else token(first.?);
         _ = try self.take(.l_brace, "Expected '{' on table declaration line; non-table declarations are unsupported");
         var fields: std.ArrayList(parsed.Field) = .empty;
         var relationships: std.ArrayList(parsed.Relationship) = .empty;
@@ -192,7 +200,7 @@ const Parser = struct {
         }
         const close = try self.take(.r_brace, "Expected '}' to close table");
         try self.lineEnd();
-        return .{ .name = token(first), .connection = connection, .documentation = docs, .fields = try fields.toOwnedSlice(self.allocator), .relationships = try relationships.toOwnedSlice(self.allocator), .directives = try directives.toOwnedSlice(self.allocator), .span = .{ .start = start, .end = close.span.end } };
+        return .{ .name = table_name, .connection = connection, .documentation = docs, .fields = try fields.toOwnedSlice(self.allocator), .relationships = try relationships.toOwnedSlice(self.allocator), .directives = try directives.toOwnedSlice(self.allocator), .span = .{ .start = start, .end = close.span.end } };
     }
 
     fn connectionHeader(self: *Parser, start: usize) Error!parsed.Connection {

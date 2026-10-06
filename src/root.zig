@@ -1,3 +1,4 @@
+pub const connection_identity = @import("connection_identity.zig");
 pub const parsed = @import("model/parsed.zig");
 pub const resolved = @import("model/resolved.zig");
 pub const emitter = @import("emitter.zig");
@@ -29,6 +30,7 @@ test {
     _ = @import("connection_integration_test.zig");
     _ = @import("generated_connection_test.zig");
     _ = @import("generated_override_test.zig");
+    _ = @import("unnamed_connection_test.zig");
     _ = @import("relationship_resolution_test.zig");
     _ = @import("relationship_integration_test.zig");
     _ = @import("foreign_key_resolution_test.zig");

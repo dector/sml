@@ -1,6 +1,6 @@
 //! Parsed syntax, before semantic resolution. Names and type references are DSL
 //! names; no SQL-name normalization, type lookup, or validation happens here.
-//! Text slices borrow the source buffer, which must outlive this model. The caller
+//! Source token slices borrow the source buffer, which must outlive this model. The caller
 //! also owns the backing arrays (or uses OwnedSchema). Documentation text may
 //! be arena-owned to join source lines. Spans are zero-based, end-exclusive.
 const std = @import("std");
@@ -12,8 +12,9 @@ pub const Span = struct {
     end: usize,
 };
 
-/// An unmodified source token. Literal delimiters are included in `text`;
-/// decoding and numeric conversion belong to semantic resolution.
+/// Source token, except unnamed table names synthesized in the syntax arena.
+/// Literal delimiters are included in `text`; decoding and numeric conversion
+/// belong to semantic resolution. Synthetic names span their source header.
 pub const Token = struct {
     text: []const u8,
     span: Span,
@@ -34,7 +35,7 @@ pub const Diagnostic = struct {
     message: []const u8,
 };
 
-/// Owns syntax arrays and joined docs, but token text still borrows source.
+/// Owns arrays, joined docs and synthesized names; source tokens borrow source.
 pub const OwnedSchema = struct {
     schema: Schema,
     arena: std.heap.ArenaAllocator,
@@ -52,7 +53,7 @@ pub const Result = union(enum) {
 
 pub const Table = struct {
     name: Token,
-    /// Named connection header; null for ordinary tables.
+    /// Connection header; null for ordinary tables. Unnamed names are arena-owned.
     connection: ?Connection = null,
     documentation: ?Documentation = null,
     fields: []const Field = &.{},
@@ -64,8 +65,9 @@ pub const Table = struct {
 
 /// Header metadata and optional body generation marker; fields remain source-only.
 pub const Connection = struct {
+    unnamed: bool = false,
     endpoints: []const Endpoint,
-    /// Standalone body `~~`, expanded by the resolver in header order.
+    /// Standalone body `~~`; unnamed generation uses canonical endpoint order.
     generated_keys_span: ?Span = null,
     /// Header from `~` through `)`, excluding the body.
     span: Span,

@@ -203,7 +203,7 @@ must be supplied on insert: there is
 no automatic prefill or ID generation for connection keys. Payload defaults,
 checks, uniqueness, indexes, and FK deletion policies behave like ordinary tables.
 The PK covers reverse FK lookups only for its first key; remaining uncovered FKs
-receive ordinary indexes. Nested endpoints and unnamed connections remain deferred.
+receive ordinary indexes. Nested endpoints remain deferred.
 
 Named `~~` generation is supported end to end. It expands before field/type
 resolution without changing parsed source fields or documentation. Generated
@@ -239,8 +239,24 @@ endpoint, and cannot use `#allow reuse`. Docs, SQL names, FK actions, valid
 inherited-type defaults, checks, uniqueness and indexes retain ordinary stored-FK
 semantics. Duplicate explicit DSL names are still errors. Other explicit fields
 follow all generated slots in source order; extra PKs fail connection validation.
-Repeated-table roles bind to their generated slots, including overrides. Unnamed
-generation remains deferred.
+Repeated-table roles bind to their generated slots, including overrides.
+
+Explicit unnamed connections support exactly two distinct, unroled endpoints:
+`~(Author, Book) { ... }`. Their canonical identity is the bytewise-sorted pair
+of exact DSL table names, independent of SQL `#name` overrides. Reversed headers
+are the same identity and duplicate declarations are errors. Named connections
+with these endpoints remain distinct. The synthesized DSL name is
+`Author__n__Book`; the default SQL name normalizes each DSL endpoint separately
+and joins them with `__n__`, yielding `author__n__book`. Parent SQL aliases do not
+affect it; a connection `#name` overrides only its SQL name. Normal namespace
+collision checks still apply. Explicit `@Author__n__Book.field` mappings may use
+the synthesized DSL name.
+
+Unnamed `~~` keys and endpoint metadata use canonical endpoint order; authored
+keys without `~~` retain exact written order. Without `~~`, all endpoint keys
+must be written: there is no implicit generation. Unnamed roles, self-pairs and
+more than two endpoints are unsupported. Shorthand `@.field` and implicit
+connection generation remain pending.
 
 Complete explicit-key example (forward mappings are allowed):
 

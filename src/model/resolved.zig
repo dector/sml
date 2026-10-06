@@ -25,15 +25,18 @@ pub const Table = struct {
     checks: []const Expression = &.{},
 };
 
-/// Named connection metadata in header order, with owned exact roles.
+/// Named metadata uses header order; unnamed metadata uses canonical DSL order.
 pub const Connection = struct {
+    unnamed: bool = false,
+    /// Owned canonical DSL identity, independent of SQL overrides.
+    identity: ?@import("../connection_identity.zig").Identity = null,
     endpoints: []const Endpoint,
 };
 
 pub const Endpoint = struct {
     table_index: usize,
     role: ?[]const u8 = null,
-    /// Generated endpoints bind header-ordered keys, including repeated tables.
+    /// Generated endpoints bind header-ordered keys (canonical for unnamed pairs).
     /// Explicit unique-table endpoints bind their PK FK column; repeated-table
     /// explicit roles remain null (names/order do not imply bindings).
     /// Public schemas may supply valid distinct explicit bindings.

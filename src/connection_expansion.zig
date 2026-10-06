@@ -1,5 +1,6 @@
 //! Resolver-owned expansion. Source fields/docs stay untouched; generated keys
-//! precede all explicit fields in header order, regardless of the marker slot.
+//! precede explicit payload in header order (canonical order for unnamed pairs),
+//! regardless of the marker slot.
 const std = @import("std");
 const parsed = @import("model/parsed.zig");
 
@@ -21,10 +22,30 @@ fn part(ctx: anytype, out: *std.ArrayList(u8), text: []const u8, pascal: bool, s
 
 pub fn expand(ctx: anytype, source: parsed.Schema) @TypeOf(ctx.*).Error!parsed.Schema {
     const needed = for (source.tables) |table| {
-        if (table.connection) |connection| if (connection.generated_keys_span != null) break true;
+        if (table.connection) |connection| if (connection.unnamed or connection.generated_keys_span != null) break true;
     } else false;
     if (!needed) return source;
     const tables = try ctx.allocator.dupe(parsed.Table, source.tables);
+    // Canonicalize a private copy, without mutating source headers or fields.
+    for (tables, 0..) |*table, ti| {
+        const connection = table.connection orelse continue;
+        if (!connection.unnamed) continue;
+        if (connection.endpoints.len != 2 or connection.endpoints[0].role != null or connection.endpoints[1].role != null)
+            return ctx.fail(.unsupported_feature, connection.span, "Unnamed connections support exactly two distinct unroled endpoints");
+        const identity = @import("connection_identity.zig").canonicalKey(connection.endpoints[0].table.text, connection.endpoints[1].table.text) catch
+            return ctx.fail(.unsupported_feature, connection.span, "Unnamed connections support exactly two distinct unroled endpoints");
+        for (tables[0..ti]) |prior| {
+            const other = prior.connection orelse continue;
+            if (!other.unnamed) continue;
+            const key = @import("connection_identity.zig").canonicalKey(other.endpoints[0].table.text, other.endpoints[1].table.text) catch unreachable;
+            if (identity.eql(key)) return ctx.fail(.duplicate_dsl_name, connection.span, "Duplicate unnamed connection identity");
+        }
+        const endpoints = try ctx.allocator.dupe(parsed.Endpoint, connection.endpoints);
+        if (!std.mem.eql(u8, endpoints[0].table.text, identity.endpoints[0])) std.mem.swap(parsed.Endpoint, &endpoints[0], &endpoints[1]);
+        table.connection.?.endpoints = endpoints;
+        table.name.text = try identity.declarationName(ctx.allocator);
+        table.name.span = connection.span;
+    }
     // Keep ordinary duplicate diagnostics independent of generated overrides.
     for (tables, 0..) |table, ti| {
         for (tables[0..ti]) |prior| if (std.mem.eql(u8, prior.name.text, table.name.text))

@@ -100,7 +100,7 @@ test "invalid connection headers and unsupported forms have exact diagnostic spa
         .{ .source = "~C(A, B) {\n~~", .fragment = "", .message = "Expected '}'" },
         .{ .source = "T {\n~~\n}", .fragment = "~~", .message = "require a named connection body" },
         .{ .source = "~~", .fragment = "~~", .message = "require a named connection body" },
-        .{ .source = "~(A, B) {}", .fragment = "~(", .message = "Unnamed connection table" },
+        .{ .source = "~(A, A) {}", .fragment = "~(A, A)", .message = "Unnamed connections support" },
         .{ .source = "~C(A, B) {\n~bs B[] @B.a\n}", .fragment = "~", .message = "Virtual relationships inside connection" },
         .{ .source = "~C(A, B) { *!a A *!b B }", .fragment = "*", .message = "Expected end of line" },
     };

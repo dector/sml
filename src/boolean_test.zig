@@ -44,7 +44,10 @@ test "Boolean source to SQL fixture and ownership" {
 }
 
 test "Boolean pipeline reclaims every allocation failure" {
-    try std.testing.checkAllAllocationFailures(std.testing.allocator, booleanPipeline, .{});
+    // Arena growth must not depend on whether backing allocations can resize
+    // in place; model layout changes otherwise make failure counts unstable.
+    var backing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .resize_fail_index = 0 });
+    try std.testing.checkAllAllocationFailures(backing.allocator(), booleanPipeline, .{});
 }
 
 test "Boolean tokens preserve spelling spans and identifier boundaries" {

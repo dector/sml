@@ -92,7 +92,7 @@ test "stored FK rejects reversed repeated incomplete markers and composite refer
         .{ "T {\n  *owner Owner, Other\n}\n", 18, 19 },
         .{ "T {\n  *owner Owner[]\n}\n", 18, 19 },
         .{ "T {\n  ~owner Owner\n}\n", 18, 19 },
-        .{ "~(Owner, T) {}\n", 0, 2 },
+        .{ "~(T, T) {}\n", 0, 7 },
     };
     inline for (cases) |case| try failureCase(std.testing.allocator, case[0], case[1], case[2]);
 }

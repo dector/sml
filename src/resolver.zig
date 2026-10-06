@@ -203,7 +203,12 @@ const Context = struct {
                     return self.fail(.duplicate_dsl_name, table.name.span, "duplicate DSL table name");
             }
             const opts = try self.options(table.directives, true);
-            const sql_name = try self.name(table.name, opts.name);
+            const sql_name = if (table.connection != null and table.connection.?.unnamed and opts.name == null) blk: {
+                const endpoints = table.connection.?.endpoints;
+                const left = try self.name(endpoints[0].table, null);
+                const right = try self.name(endpoints[1].table, null);
+                break :blk try std.fmt.allocPrint(self.allocator, "{s}__n__{s}", .{ left, right });
+            } else try self.name(table.name, opts.name);
             for (tables[0..i]) |previous| {
                 if (std.ascii.eqlIgnoreCase(previous.sql_name, sql_name))
                     return self.fail(.sql_name_collision, if (opts.name) |n| n.span else table.name.span, "SQL table names collide (ASCII case-insensitive)");
@@ -458,7 +463,14 @@ const Context = struct {
                     if (column.primary_key != .none and @import("connection_validation.zig").matches(column, tables[target])) endpoints[ei].column_index = ci;
                 };
             }
-            tables[ti].connection = .{ .endpoints = endpoints };
+            tables[ti].connection = .{
+                .unnamed = connection.unnamed,
+                .identity = if (connection.unnamed) @import("connection_identity.zig").Identity{ .endpoints = .{
+                    tables[endpoints[0].table_index].dsl_name,
+                    tables[endpoints[1].table_index].dsl_name,
+                } } else null,
+                .endpoints = endpoints,
+            };
         }
         for (input.tables, 0..) |table, ti| {
             if (table.connection) |connection| {
