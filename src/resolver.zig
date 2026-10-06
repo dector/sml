@@ -14,6 +14,7 @@ pub const Category = enum {
     unknown_type,
     unknown_foreign_key_target,
     invalid_foreign_key_target,
+    invalid_foreign_key_action,
     foreign_key_cycle,
     invalid_identifier,
     duplicate_dsl_name,
@@ -85,6 +86,9 @@ const Context = struct {
             .name => |token| {
                 if (result.name != null) return self.fail(.duplicate_directive, directive.span, "duplicate #name directive");
                 result.name = token;
+            },
+            .on_delete => {
+                if (table) return self.fail(.invalid_directive_scope, directive.span, "#onDelete requires a foreign-key field");
             },
             .check => {},
             .native_unique, .index => {},
@@ -218,6 +222,18 @@ const Context = struct {
                         return self.fail(.duplicate_dsl_name, field.name.span, "duplicate DSL field name");
                 }
                 const field_opts = try self.options(field.directives, false);
+                var delete_action: resolved.DeleteAction = .restrict;
+                var has_delete_action = false;
+                for (field.directives) |directive| {
+                    if (directive.kind != .on_delete) continue;
+                    if (!field.foreign_key) return self.fail(.invalid_directive_scope, directive.span, "#onDelete requires a foreign-key field");
+                    if (has_delete_action) return self.fail(.duplicate_directive, directive.span, "duplicate #onDelete directive");
+                    has_delete_action = true;
+                    const action = directive.kind.on_delete;
+                    delete_action = if (std.mem.eql(u8, action.text, "restrict")) .restrict else if (std.mem.eql(u8, action.text, "cascade")) .cascade else if (std.mem.eql(u8, action.text, "setNull")) .set_null else return self.fail(.invalid_foreign_key_action, action.span, "Unknown #onDelete action; expected restrict, cascade or setNull");
+                    if (delete_action == .set_null and !field.type.nullable)
+                        return self.fail(.invalid_foreign_key_action, directive.span, "#onDelete setNull requires a nullable foreign-key field");
+                }
                 const column_name = try self.name(field.name, field_opts.name);
                 for (columns[0..j]) |previous| {
                     if (std.ascii.eqlIgnoreCase(previous.sql_name, column_name))
@@ -291,6 +307,7 @@ const Context = struct {
                     .primary_key = if (field_opts.reuse != null) .allow_reuse else if (field.primary_key) .standard else .none,
                     .default = value,
                     .foreign_key = if (graph[i][j].target_table) |target| .{
+                        .delete_action = delete_action,
                         .target_table_sql_name = try self.name(input.tables[target].name, (try self.options(input.tables[target].directives, true)).name),
                         .target_column_sql_name = try self.name(input.tables[target].fields[graph[i][j].target_column.?].name, (try self.options(input.tables[target].fields[graph[i][j].target_column.?].directives, false)).name),
                     } else null,

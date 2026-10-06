@@ -179,7 +179,11 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
                 try writeIdentifier(writer, fk.target_table_sql_name);
                 try writer.writeByte('(');
                 try writeIdentifier(writer, fk.target_column_sql_name);
-                try writer.writeAll(") ON DELETE RESTRICT");
+                try writer.writeAll(switch (fk.delete_action) {
+                    .restrict => ") ON DELETE RESTRICT",
+                    .cascade => ") ON DELETE CASCADE",
+                    .set_null => ") ON DELETE SET NULL",
+                });
             }
             if (index + 1 < table.columns.len or key_count > 1 or table.checks.len > 0 or table.unique_constraints.len > 0) try writer.writeByte(',');
             try writer.writeByte('\n');
@@ -242,7 +246,8 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
 }
 
 fn validateForeignKey(schema: resolved.Schema, column: resolved.Column, fk: resolved.ForeignKey) Error!void {
-    if (column.primary_key != .none or fk.delete_action != .restrict) return error.UnsupportedForeignKey;
+    if (column.primary_key != .none) return error.UnsupportedForeignKey;
+    if (fk.delete_action == .set_null and !column.nullable) return error.InvalidForeignKey;
     for ([_][]const u8{ fk.target_table_sql_name, fk.target_column_sql_name }) |name| {
         if (name.len == 0 or std.mem.indexOfScalar(u8, name, 0) != null) return error.InvalidIdentifier;
     }

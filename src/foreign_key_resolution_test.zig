@@ -103,6 +103,13 @@ fn reject(allocator: std.mem.Allocator, input: []const u8, category: resolver.Ca
 test "FK target diagnostics and inherited default validation have precise spans" {
     const cases = .{
         .{ "C {\n *p Missing\n}\n", .unknown_foreign_key_target, "Missing" },
+        .{ "P {\n !id int\n #onDelete cascade\n}\n", .invalid_directive_scope, "#onDelete cascade" },
+        .{ "P {\n !id int =\n   #onDelete cascade\n}\n", .invalid_directive_scope, "#onDelete cascade" },
+        .{ "C {\n *p P =\n   #onDelete setNull\n}\nP {\n !id int\n}\n", .invalid_foreign_key_action, "#onDelete setNull" },
+        .{ "C {\n *p P? =\n   #onDelete unknown\n}\nP {\n !id int\n}\n", .invalid_foreign_key_action, "unknown" },
+        .{ "C {\n *p P? =\n   #onDelete cascade\n   #onDelete restrict\n}\nP {\n !id int\n}\n", .duplicate_directive, "#onDelete restrict" },
+        .{ "C {\n *!p P? =\n   #onDelete setNull\n}\nP {\n !id int\n}\n", .nullable_primary_key, "P?" },
+        .{ "C {\n *!p P =\n   #onDelete setNull\n}\nP {\n !id int\n}\n", .unsupported_feature, "*!p P =\n   #onDelete setNull" },
         .{ "C {\n *p P\n}\nP {\n value int\n}\n", .invalid_foreign_key_target, "P" },
         .{ "C {\n *p P\n}\nP {\n !a int\n !b int\n}\n", .invalid_foreign_key_target, "P" },
         .{ "C {\n *p P\n}\nP {\n !a bool\n}\n", .invalid_primary_key, "bool" },
@@ -121,6 +128,7 @@ test "FK target diagnostics and inherited default validation have precise spans"
     inline for (cases) |case| try reject(std.testing.allocator, case[0], case[1], case[2]);
     var backing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .resize_fail_index = 0 });
     try std.testing.checkAllAllocationFailures(backing.allocator(), reject, .{ "P {\n *!key P\n}\n", resolver.Category.foreign_key_cycle, "P" });
+    try std.testing.checkAllAllocationFailures(backing.allocator(), reject, .{ "C {\n *p P =\n   #onDelete setNull\n}\nP {\n !id int\n}\n", resolver.Category.invalid_foreign_key_action, "#onDelete setNull" });
 }
 
 fn manual(allocator: std.mem.Allocator) !void {

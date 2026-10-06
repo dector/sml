@@ -116,6 +116,8 @@ pub const Index = struct {
 pub const Directive = struct {
     kind: union(enum) {
         name: Token,
+        /// Contextual action word; validated only during semantic resolution.
+        on_delete: Token,
         native_unique: NativeUnique,
         index: Index,
         /// Argument-free flag, valid only inside index options.

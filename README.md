@@ -96,7 +96,7 @@ preflights the whole schema before writing.
 Ordinary expressions such as `? unique == 'x'` still parse `unique` as an identifier.
 Unsupported later-v1 syntax returns a diagnostic.
 
-StoredFK Slice3 emits stored foreign keys. `*field Table?`
+StoredFK Slice4 emits stored foreign keys and deletion actions. `*field Table?`
 looks up the exact DSL table name (including forward/self references), requires
 one declared PK field, and inherits its logical type and enum allowed values.
 SQL target names honor `#name` and are owned by the resolved schema. Nullability,
@@ -105,10 +105,13 @@ local defaults are validated against the inherited type. Enum FK defaults use
 bare words or backtick text; datetime FK defaults also accept `::now`.
 Keyless/composite targets and type-dependency cycles are diagnosed. `*!field`
 parses but shared-identity resolution waits for Slice5; `#allow reuse` is invalid
-on every FK. SQL emits quoted `REFERENCES table(column) ON DELETE RESTRICT`;
-deferrability is unspecified. Forward, self, and mutual ordinary references work.
-No automatic FK indexes are created. Non-RESTRICT metadata and shared-PK FKs
-are rejected with `error.UnsupportedForeignKey` until later slices.
+on every FK. Field `#onDelete restrict`, `cascade`, and `setNull` emit quoted
+`REFERENCES table(column) ON DELETE RESTRICT`, `CASCADE`, or `SET NULL`.
+The default is restrict; setNull requires local nullability. Duplicate actions,
+unknown actions, and table/non-FK scope are diagnosed. `#onUpdate` is unsupported.
+Deferrability is unspecified. Forward, self, and mutual ordinary references work.
+No automatic FK indexes are created. Shared-PK FKs remain unsupported until Slice5;
+nonnullable set-null metadata fails emitter preflight before any output.
 Public resolved schemas must supply consistent FK metadata: SQL names match
 ASCII-case-insensitively, the target has exactly one real PK, and logical types
 and enum value sets match exactly (enum order does not matter). Invalid metadata

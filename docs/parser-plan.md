@@ -139,12 +139,15 @@ unknown field references still fail resolution. Tests: `src/table_check_test.zig
 `table_checks.pzl`/SQL fixture, and `src/testdata/table_check_runtime_test.py`
 (INSERT and UPDATE enforcement). Field-check coverage remains intact.
 
-StoredFK Slice2 parses stored `*field Target?` (and `*!field Target`) and
-resolves non-PK FK target names and inherited logical types across forward/self
-references. PK+FK resolution waits for Slice5. FK SQL emission waits for Slice3;
-the emitter currently rejects FK metadata. No deletion directives or automatic
-FK indexes are implemented yet. See design §12 and
-`src/foreign_key_resolution_test.zig`.
+StoredFK Slice4 parses stored `*field Target?` (and `*!field Target`), resolves
+non-PK targets and inherited logical types, and emits FK SQL. Field `#onDelete`
+retains contextual identifier tokens, duplicates, and directive spans. Resolution
+accepts only restrict/cascade/setNull after inherited types are ready; setNull
+requires local nullability. Table/non-FK scope, duplicates, and unknown actions
+are diagnosed. Emitter preflight rejects nonnullable set-null metadata.
+PK+FK resolution waits for Slice5. `#onUpdate` and automatic FK indexes remain
+unsupported. See design §12 and `src/foreign_key_resolution_test.zig`,
+`src/foreign_key_emission_test.zig`, and the Python runtime fixture.
 Other generators, date/JSON, expression indexes, relationships, and
 connections come in later slices. Reusable types are deferred indefinitely.
 Numeric exponent notation and multiline literals are deferred.

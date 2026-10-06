@@ -39,3 +39,27 @@ Right {
   !id int
   *left Left?
 }
+CascadeParent {
+  !id real
+}
+CascadeChild {
+  !id int
+  *parent CascadeParent =
+    #onDelete cascade
+}
+CascadeLeaf {
+  !id int
+  *parent CascadeChild {
+    #onDelete cascade
+  }
+}
+NullChild {
+  !id int
+  *parent CascadeParent? =
+    #onDelete setNull
+}
+CascadeNode {
+  !id int
+  *parent CascadeNode? =
+    #onDelete cascade
+}

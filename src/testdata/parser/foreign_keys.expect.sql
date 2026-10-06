@@ -39,4 +39,28 @@ CREATE TABLE "right" (
   "left" INTEGER REFERENCES "left"("id") ON DELETE RESTRICT
 ) STRICT;
 
+CREATE TABLE "cascade_parent" (
+  "id" REAL NOT NULL PRIMARY KEY
+) STRICT;
+
+CREATE TABLE "cascade_child" (
+  "id" INTEGER PRIMARY KEY AUTOINCREMENT,
+  "parent" REAL NOT NULL REFERENCES "cascade_parent"("id") ON DELETE CASCADE
+) STRICT;
+
+CREATE TABLE "cascade_leaf" (
+  "id" INTEGER PRIMARY KEY AUTOINCREMENT,
+  "parent" INTEGER NOT NULL REFERENCES "cascade_child"("id") ON DELETE CASCADE
+) STRICT;
+
+CREATE TABLE "null_child" (
+  "id" INTEGER PRIMARY KEY AUTOINCREMENT,
+  "parent" REAL REFERENCES "cascade_parent"("id") ON DELETE SET NULL
+) STRICT;
+
+CREATE TABLE "cascade_node" (
+  "id" INTEGER PRIMARY KEY AUTOINCREMENT,
+  "parent" INTEGER REFERENCES "cascade_node"("id") ON DELETE CASCADE
+) STRICT;
+
 CREATE INDEX "child_label_idx" ON "child" ("label");

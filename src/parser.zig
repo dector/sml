@@ -385,6 +385,12 @@ const Parser = struct {
             return self.check(marker.span.start, field_scope);
         }
         const hash = try self.take(.hash, "Expected supported field directive or ? expression");
+        if (self.word("onDelete")) {
+            try self.advance();
+            const value = try self.take(.identifier, "#onDelete requires an action identifier (restrict, cascade or setNull)");
+            return .{ .kind = .{ .on_delete = token(value) }, .span = .{ .start = hash.span.start, .end = value.span.end } };
+        }
+        if (self.word("onUpdate")) return self.fail(self.current.span, "#onUpdate is unsupported; foreign-key update actions are not supported");
         if (self.word("index")) return self.index(hash.span.start, field_scope);
         if (self.word("check")) {
             try self.advance();

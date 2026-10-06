@@ -72,10 +72,20 @@ test "public resolved FK metadata preflight leaves output empty" {
     local = valid;
     local.primary_key = .standard;
     try reject(local, &.{key}, error.UnsupportedForeignKey);
+    local = valid;
+    local.foreign_key.?.delete_action = .set_null;
+    try reject(local, &.{key}, error.InvalidForeignKey);
     for ([_]resolved.DeleteAction{ .cascade, .set_null }) |action| {
         local = valid;
+        local.nullable = action == .set_null;
         local.foreign_key.?.delete_action = action;
-        try reject(local, &.{key}, error.UnsupportedForeignKey);
+        var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+        defer output.deinit();
+        try emitter.emit(.{ .tables = &.{
+            .{ .dsl_name = "C", .sql_name = "C", .columns = &.{local} },
+            .{ .dsl_name = "P", .sql_name = "P", .columns = &.{key} },
+        } }, &output.writer);
+        try std.testing.expect(std.mem.indexOf(u8, output.written(), if (action == .cascade) "ON DELETE CASCADE" else "ON DELETE SET NULL") != null);
     }
     local = valid;
     local.type = .boolean;
