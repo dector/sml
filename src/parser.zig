@@ -136,10 +136,10 @@ const Parser = struct {
             if (self.current.kind == .l_paren)
                 return self.fail(.{ .start = start, .end = self.current.span.end }, "Unnamed connection table declarations are unsupported");
             if (self.current.kind == .tilde)
-                return self.fail(.{ .start = start, .end = self.current.span.end }, "Generated connection keys not yet supported");
+                return self.fail(.{ .start = start, .end = self.current.span.end }, "Generated connection keys require a named connection body");
         }
         const first = try self.name();
-        const connection: ?parsed.Connection = if (is_connection) try self.connectionHeader(start) else null;
+        var connection: ?parsed.Connection = if (is_connection) try self.connectionHeader(start) else null;
         _ = try self.take(.l_brace, "Expected '{' on table declaration line; non-table declarations are unsupported");
         var fields: std.ArrayList(parsed.Field) = .empty;
         var relationships: std.ArrayList(parsed.Relationship) = .empty;
@@ -168,8 +168,18 @@ const Parser = struct {
                 } else if (self.current.kind == .tilde) {
                     var lookahead = self.lexer;
                     const next = lookahead.next();
-                    if (next == .token and next.token.kind == .tilde)
-                        return self.fail(.{ .start = self.current.span.start, .end = next.token.span.end }, "Generated connection keys not yet supported");
+                    if (next == .token and next.token.kind == .tilde) {
+                        const marker_span: parsed.Span = .{ .start = self.current.span.start, .end = next.token.span.end };
+                        try self.noDocs(field_docs);
+                        if (connection == null) return self.fail(marker_span, "Generated connection keys require a named connection body");
+                        if (connection.?.generated_keys_span != null) return self.fail(marker_span, "Duplicate generated connection keys marker");
+                        connection.?.generated_keys_span = marker_span;
+                        relationship_indent = null;
+                        try self.advance();
+                        try self.advance();
+                        try self.lineEnd();
+                        continue;
+                    }
                     if (connection != null)
                         return self.fail(self.current.span, "Virtual relationships inside connection tables are unsupported");
                     relationship_indent = self.current.indent;

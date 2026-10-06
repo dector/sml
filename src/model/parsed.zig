@@ -62,9 +62,11 @@ pub const Table = struct {
     span: Span,
 };
 
-/// Header metadata only; explicit fields remain ordinary table fields.
+/// Header metadata and optional body generation marker; fields remain source-only.
 pub const Connection = struct {
     endpoints: []const Endpoint,
+    /// Standalone body `~~`, expanded by the resolver in header order.
+    generated_keys_span: ?Span = null,
     /// Header from `~` through `)`, excluding the body.
     span: Span,
 };

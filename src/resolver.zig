@@ -181,7 +181,8 @@ const Context = struct {
         return concrete;
     }
 
-    fn schema(self: *Context, input: parsed.Schema) Error!resolved.Schema {
+    fn schema(self: *Context, source: parsed.Schema) Error!resolved.Schema {
+        const input = try @import("connection_expansion.zig").expand(self, source);
         const graph = try self.allocator.alloc([]TypeNode, input.tables.len);
         // Validate DSL table identity before resolving references.
         for (input.tables, 0..) |table, i| {
@@ -436,8 +437,8 @@ const Context = struct {
             }
             table.indexes = try indexes.toOwnedSlice(self.allocator);
         }
-        // Preserve header order and own roles. Repeated-table roles deliberately
-        // remain unbound: neither key names nor declaration order imply a role.
+        // Preserve header order and own roles. Generated keys have known slots;
+        // explicit repeated-table roles remain unbound (no naming inference).
         for (input.tables, 0..) |table, ti| {
             const connection = table.connection orelse continue;
             const endpoints = try self.allocator.alloc(resolved.Endpoint, connection.endpoints.len);
@@ -452,6 +453,7 @@ const Context = struct {
                 for (connection.endpoints) |other| {
                     if (std.mem.eql(u8, other.table.text, endpoint.table.text)) count += 1;
                 }
+                if (connection.generated_keys_span != null) endpoints[ei].column_index = ei;
                 if (count == 1) for (tables[ti].columns, 0..) |column, ci| {
                     if (column.primary_key != .none and @import("connection_validation.zig").matches(column, tables[target])) endpoints[ei].column_index = ci;
                 };
@@ -461,7 +463,7 @@ const Context = struct {
         for (input.tables, 0..) |table, ti| {
             if (table.connection) |connection| {
                 @import("connection_validation.zig").validate(.{ .tables = tables }, tables[ti]) catch
-                    return self.fail(.invalid_connection, connection.span, "Connection requires explicit nonnullable primary-key foreign keys matching its normal endpoints and unique roles for repeated tables");
+                    return self.fail(.invalid_connection, connection.span, "Connection requires nonnullable primary-key foreign keys matching its normal endpoints and unique roles for repeated tables");
             }
         }
         return .{ .tables = tables, .relationships = try self.relationships(input, tables) };

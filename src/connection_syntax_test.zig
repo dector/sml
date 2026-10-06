@@ -92,9 +92,14 @@ test "invalid connection headers and unsupported forms have exact diagnostic spa
         .{ .source = "~C(A, B)", .fragment = "", .message = "Expected '{'" },
         .{ .source = "~C(A, B) {\n", .fragment = "", .message = "Expected '}'" },
         .{ .source = "~C(A,\n--- Nope\nB) {}", .fragment = "--- Nope", .message = "Expected a declaration name" },
-        .{ .source = "~C(A, B) {\n~~\n}", .fragment = "~~", .message = "Generated connection keys not yet supported" },
-        .{ .source = "T {\n~~\n}", .fragment = "~~", .message = "Generated connection keys not yet supported" },
-        .{ .source = "~~", .fragment = "~~", .message = "Generated connection keys not yet supported" },
+        .{ .source = "~C(A, B) {\n~~ int\n}", .fragment = "int", .message = "Expected end of line" },
+        .{ .source = "~C(A, B) {\n~~ #name `x`\n}", .fragment = "#", .message = "Expected end of line" },
+        .{ .source = "~C(A, B) {\n~~ {\n}\n}", .fragment = "{", .message = "Expected end of line" },
+        .{ .source = "~C(A, B) {\n--- Nope\n~~\n}", .fragment = "--- Nope", .message = "Unattached documentation" },
+        .{ .source = "~C(A, B) {\n~~\n~~\n}", .fragment = "~~", .message = "Duplicate generated" },
+        .{ .source = "~C(A, B) {\n~~", .fragment = "", .message = "Expected '}'" },
+        .{ .source = "T {\n~~\n}", .fragment = "~~", .message = "require a named connection body" },
+        .{ .source = "~~", .fragment = "~~", .message = "require a named connection body" },
         .{ .source = "~(A, B) {}", .fragment = "~(", .message = "Unnamed connection table" },
         .{ .source = "~C(A, B) {\n~bs B[] @B.a\n}", .fragment = "~", .message = "Virtual relationships inside connection" },
         .{ .source = "~C(A, B) { *!a A *!b B }", .fragment = "*", .message = "Expected end of line" },
@@ -128,12 +133,12 @@ fn allocatedConnections(allocator: std.mem.Allocator) !void {
     const semantic = try resolver.resolve(allocator, first.schema.schema);
     try std.testing.expect(semantic == .diagnostic);
     try std.testing.expectEqual(resolver.Category.unknown_foreign_key_target, semantic.diagnostic.category);
-    var invalid = try parser.parse(allocator, "--- Docs\n~Bad(a A, B) {\n*!a A\n~~\n}\n");
+    var invalid = try parser.parse(allocator, "--- Docs\n~Bad(a A, B) {\n*!a A\n~~ int\n}\n");
     if (invalid == .schema) {
         invalid.schema.deinit();
         return error.ExpectedDiagnostic;
     }
-    try std.testing.expectEqualStrings("Generated connection keys not yet supported", invalid.diagnostic.message);
+    try std.testing.expect(std.mem.indexOf(u8, invalid.diagnostic.message, "Expected end of line") != null);
 }
 
 test "resolver reports unrelated invalid types normally with connection headers" {

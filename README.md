@@ -170,14 +170,15 @@ Item {
 }
 ```
 
-NamedConnections Slice2 supports named stored connections with explicit `*!`
-keys only. Each normal endpoint table must have exactly one PK. The connection
+NamedConnections supports named stored connections with explicit `*!`
+keys or a standalone body `~~` marker. Each normal endpoint table must have exactly one PK. The connection
 PK FK targets must exactly match the endpoint multiset; payload fields and
 additional non-PK FKs are allowed. Composite PK SQL preserves written key order.
 Repeated-table endpoints require distinct explicit roles. Resolved header-order
 `connection.endpoints` own exact roles and stable `table_index` values. Unique-table
-endpoints bind `column_index`; repeated-table roles leave it null. Neither key
-names nor declaration order imply role-to-column binding. SQL preflights public
+endpoints bind `column_index`; explicit repeated-table roles leave it null.
+Generated endpoints bind their header-ordered columns, including self roles.
+For explicit keys, neither names nor declaration order imply role binding. SQL preflights public
 connection metadata and returns `InvalidConnection` before output on violations.
 NamedConnections Slice3 supports endpoint mappings through declared connections:
 `~books Book[] @Borrow.reader` or `~following Reader[]
@@ -202,18 +203,25 @@ must be supplied on insert: there is
 no automatic prefill or ID generation for connection keys. Payload defaults,
 checks, uniqueness, indexes, and FK deletion policies behave like ordinary tables.
 The PK covers reverse FK lookups only for its first key; remaining uncovered FKs
-receive ordinary indexes. Nested endpoints, unnamed connections, and `~~`
-generated keys remain deferred.
+receive ordinary indexes. Nested endpoints and unnamed connections remain deferred.
 
-Agreed future generated-connection rules (design §14): DSL key names are
-`camelCase(table-or-role DSL name) + PascalCase(PK DSL field name)`:
-`Author.id` → `authorId`, role `writer` with `accountKey` → `writerAccountKey`.
-SQL normalization remains unchanged. Named generated fields follow header
-endpoint order; unnamed fields sort by exact table DSL name, then role DSL name
-for ties, using bytewise ASCII case-sensitive comparison, never SQL names.
-Generated composite PKs follow that order; explicit keys keep authored order,
-and overrides keep their generated slots. Component casing edge cases remain
-for implementation to clarify consistently; these rules are not implemented.
+Named `~~` generation is supported end to end. It expands before field/type
+resolution without changing parsed source fields or documentation. Generated
+nonnullable PK FKs come first in **header order**, before all explicit payload
+fields, regardless of the marker's body position. They have no defaults or
+options; insert must supply every endpoint key. Each endpoint requires one
+normal-table declared PK, including FK PK chains.
+
+DSL names are `camelCase(table-or-role DSL name) + PascalCase(PK DSL field name)`:
+`Author.id` → `authorId`, `writer.accountKey` → `writerAccountKey`,
+`Snake_Name.account_key` → `snakeNameAccountKey`. Underscores are removed and
+uppercase the following character; leading underscores are stripped. Only the
+initial character changes case otherwise, preserving existing humps/acronyms
+(`URL` → `uRL`). All-underscore components and generated-name collisions are
+errors: declare distinct roles or explicit keys. Parent SQL `#name` aliases do
+not affect generated DSL names; ordinary SQL normalization remains unchanged.
+Explicit fields matching a generated name are rejected with an override-specific
+diagnostic. Generated-key overrides are the next slice; unnamed generation is later.
 
 Complete explicit-key example (forward mappings are allowed):
 

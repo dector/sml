@@ -33,8 +33,9 @@ pub const Connection = struct {
 pub const Endpoint = struct {
     table_index: usize,
     role: ?[]const u8 = null,
-    /// Unique-table endpoints bind their explicit PK FK column. Repeated-table
-    /// roles remain null: key names and declaration order do not imply bindings.
+    /// Generated endpoints bind header-ordered keys, including repeated tables.
+    /// Explicit unique-table endpoints bind their PK FK column; repeated-table
+    /// explicit roles remain null (names/order do not imply bindings).
     /// Public schemas may supply valid distinct explicit bindings.
     column_index: ?usize = null,
 };
