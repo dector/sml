@@ -52,11 +52,27 @@ pub const Result = union(enum) {
 
 pub const Table = struct {
     name: Token,
+    /// Named connection header; null for ordinary tables.
+    connection: ?Connection = null,
     documentation: ?Documentation = null,
     fields: []const Field = &.{},
     /// Virtual declarations, in source order; never stored fields.
     relationships: []const Relationship = &.{},
     directives: []const Directive = &.{},
+    span: Span,
+};
+
+/// Header metadata only; explicit fields remain ordinary table fields.
+pub const Connection = struct {
+    endpoints: []const Endpoint,
+    /// Header from `~` through `)`, excluding the body.
+    span: Span,
+};
+
+pub const Endpoint = struct {
+    table: Token,
+    role: ?Token = null,
+    /// One table identifier or the role/table pair.
     span: Span,
 };
 

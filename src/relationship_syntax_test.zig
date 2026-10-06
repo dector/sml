@@ -81,8 +81,7 @@ test "relationship mapping and options have explicit diagnostics" {
     const cases = [_][2][]const u8{
         .{ "T {\n  ~books Book[]\n}\n", "require a direct @Table.field" },
         .{ "T {\n  ~books Book[] @.owner\n}\n", "Connection shorthand" },
-        .{ "~Connection(A, B) {}", "Connection table" },
-        .{ "~(A, B) {}", "Connection table" },
+        .{ "~(A, B) {}", "Unnamed connection table" },
         .{ "T {\n  ~books Book[]? @Book.owner\n}", "cannot be nullable" },
         .{ "T {\n  books Book[]\n}", "Stored arrays" },
         .{ "T {\n  ~books Book[] (null) @Book.owner\n}", "cannot have defaults" },

@@ -129,8 +129,17 @@ const Parser = struct {
     }
 
     fn table(self: *Parser, docs: ?parsed.Documentation) Error!parsed.Table {
-        if (self.current.kind == .tilde) return self.fail(self.current.span, "Connection table declarations are unsupported");
+        const start = self.current.span.start;
+        const is_connection = self.current.kind == .tilde;
+        if (is_connection) {
+            try self.advance();
+            if (self.current.kind == .l_paren)
+                return self.fail(.{ .start = start, .end = self.current.span.end }, "Unnamed connection table declarations are unsupported");
+            if (self.current.kind == .tilde)
+                return self.fail(.{ .start = start, .end = self.current.span.end }, "Generated connection keys not yet supported");
+        }
         const first = try self.name();
+        const connection: ?parsed.Connection = if (is_connection) try self.connectionHeader(start) else null;
         _ = try self.take(.l_brace, "Expected '{' on table declaration line; non-table declarations are unsupported");
         var fields: std.ArrayList(parsed.Field) = .empty;
         var relationships: std.ArrayList(parsed.Relationship) = .empty;
@@ -157,6 +166,12 @@ const Parser = struct {
                     try directives.append(self.allocator, try self.directive(false));
                     try self.lineEnd();
                 } else if (self.current.kind == .tilde) {
+                    var lookahead = self.lexer;
+                    const next = lookahead.next();
+                    if (next == .token and next.token.kind == .tilde)
+                        return self.fail(.{ .start = self.current.span.start, .end = next.token.span.end }, "Generated connection keys not yet supported");
+                    if (connection != null)
+                        return self.fail(self.current.span, "Virtual relationships inside connection tables are unsupported");
                     relationship_indent = self.current.indent;
                     try relationships.append(self.allocator, try self.relationship(field_docs));
                 } else {
@@ -167,7 +182,34 @@ const Parser = struct {
         }
         const close = try self.take(.r_brace, "Expected '}' to close table");
         try self.lineEnd();
-        return .{ .name = token(first), .documentation = docs, .fields = try fields.toOwnedSlice(self.allocator), .relationships = try relationships.toOwnedSlice(self.allocator), .directives = try directives.toOwnedSlice(self.allocator), .span = .{ .start = first.span.start, .end = close.span.end } };
+        return .{ .name = token(first), .connection = connection, .documentation = docs, .fields = try fields.toOwnedSlice(self.allocator), .relationships = try relationships.toOwnedSlice(self.allocator), .directives = try directives.toOwnedSlice(self.allocator), .span = .{ .start = start, .end = close.span.end } };
+    }
+
+    fn connectionHeader(self: *Parser, start: usize) Error!parsed.Connection {
+        _ = try self.take(.l_paren, "Expected '(' after named connection name");
+        try self.expressionTrivia();
+        var endpoints: std.ArrayList(parsed.Endpoint) = .empty;
+        while (true) {
+            const first = try self.name();
+            // Grouping trivia is allowed throughout the endpoint list, but
+            // documentation is only accepted at declaration boundaries.
+            try self.expressionTrivia();
+            const second: ?Token = if (self.current.kind == .identifier) try self.name() else null;
+            try endpoints.append(self.allocator, .{
+                .table = token(second orelse first),
+                .role = if (second != null) token(first) else null,
+                .span = .{ .start = first.span.start, .end = (second orelse first).span.end },
+            });
+            try self.expressionTrivia();
+            if (self.current.kind == .r_paren) break;
+            _ = try self.take(.comma, "Expected ',' or ')' after connection endpoint");
+            try self.expressionTrivia();
+            // name() rejects empty entries and trailing commas.
+        }
+        if (endpoints.items.len < 2)
+            return self.fail(self.current.span, "Connections require at least two endpoints");
+        const close = try self.take(.r_paren, "Expected ')' after connection endpoints");
+        return .{ .endpoints = try endpoints.toOwnedSlice(self.allocator), .span = .{ .start = start, .end = close.span.end } };
     }
 
     fn relationship(self: *Parser, docs: ?parsed.Documentation) Error!parsed.Relationship {

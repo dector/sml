@@ -181,6 +181,11 @@ const Context = struct {
     }
 
     fn schema(self: *Context, input: parsed.Schema) Error!resolved.Schema {
+        // Never lower a connection as an ordinary table before endpoint binding exists.
+        for (input.tables) |table| {
+            if (table.connection) |connection|
+                return self.fail(.unsupported_feature, connection.span, "Named connection resolution is not yet supported");
+        }
         const graph = try self.allocator.alloc([]TypeNode, input.tables.len);
         // Validate DSL table identity before resolving references.
         for (input.tables, 0..) |table, i| {

@@ -15,6 +15,7 @@ pub const Schema = struct {
 /// Stored tables, including expanded connection tables.
 pub const Table = struct {
     dsl_name: []const u8,
+    connection: ?Connection = null,
     documentation: ?Documentation = null,
     sql_name: []const u8,
     columns: []const Column = &.{},
@@ -22,6 +23,18 @@ pub const Table = struct {
     indexes: []const Index = &.{},
     /// Explicit table checks in directive source order.
     checks: []const Expression = &.{},
+};
+
+/// Named connection metadata; endpoint binding is deferred to a later slice.
+pub const Connection = struct {
+    endpoints: []const Endpoint,
+};
+
+pub const Endpoint = struct {
+    table_index: usize,
+    role: ?[]const u8 = null,
+    /// Local explicit FK column, when bound.
+    column_index: ?usize = null,
 };
 
 /// Logical column types. Boolean uses INTEGER; datetime and enumeration use TEXT.
