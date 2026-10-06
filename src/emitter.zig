@@ -7,14 +7,15 @@ const writeBlob = sql_writer.writeBlob;
 const resolved = @import("model/resolved.zig");
 const expression_emitter = @import("expression_emitter.zig");
 
-pub const Error = expression_emitter.Error || error{ NullablePrimaryKey, InvalidPrimaryKey, InvalidIdReuse, InvalidDefault, InvalidEnum, DefaultOnAutoPrimaryKey, InvalidCheck, InvalidUnique, InvalidIndex, SqlNameCollision, UnsupportedForeignKey };
+pub const Error = expression_emitter.Error || error{ NullablePrimaryKey, InvalidPrimaryKey, InvalidIdReuse, InvalidDefault, InvalidEnum, DefaultOnAutoPrimaryKey, InvalidCheck, InvalidUnique, InvalidIndex, SqlNameCollision, UnsupportedForeignKey, InvalidForeignKey };
 
 /// Emit tables and columns in schema order, then ordered table CHECK items.
 /// Zero-column tables (even checks-only tables) remain non-executable skeletons.
 /// Relationships are virtual and produce no SQL.
 /// NUL-containing SQL names, invalid primary keys, ID reuse options, and literal
-/// defaults and enum metadata are rejected before writing. StoredFK Slice2
-/// metadata is rejected with UnsupportedForeignKey until Slice3 SQL support.
+/// defaults and enum metadata are rejected before writing. Foreign-key metadata
+/// must match a single real primary key and its logical type/enum value set.
+/// Shared primary-key FKs and non-RESTRICT actions remain unsupported.
 /// Raw SQL is trusted
 /// and not syntax-validated, including direct resolved enum raw-SQL defaults.
 /// Writer failures may leave partial output. The caller owns and flushes the writer.
@@ -67,8 +68,7 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
             if (@import("expression_resolver.zig").validateCheckResult(&check) != null) return error.InvalidCheck;
         }
         for (table.columns, 0..) |column, column_index| {
-            // Slice2 resolves metadata only; never silently discard an FK.
-            if (column.foreign_key != null) return error.UnsupportedForeignKey;
+            if (column.foreign_key) |fk| try validateForeignKey(schema, column, fk);
             if (column.unique_constraints.len > 1) return error.InvalidUnique;
             for (column.unique_constraints) |unique| {
                 if (unique.nulls != .distinct or unique.columns.len != 0) return error.InvalidUnique;
@@ -174,6 +174,13 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
                 }
                 try writer.writeAll(" UNIQUE");
             }
+            if (column.foreign_key) |fk| {
+                try writer.writeAll(" REFERENCES ");
+                try writeIdentifier(writer, fk.target_table_sql_name);
+                try writer.writeByte('(');
+                try writeIdentifier(writer, fk.target_column_sql_name);
+                try writer.writeAll(") ON DELETE RESTRICT");
+            }
             if (index + 1 < table.columns.len or key_count > 1 or table.checks.len > 0 or table.unique_constraints.len > 0) try writer.writeByte(',');
             try writer.writeByte('\n');
         }
@@ -232,6 +239,29 @@ pub fn emit(schema: resolved.Schema, writer: *std.Io.Writer) Error!void {
         }
         try writer.writeAll(";\n");
     };
+}
+
+fn validateForeignKey(schema: resolved.Schema, column: resolved.Column, fk: resolved.ForeignKey) Error!void {
+    if (column.primary_key != .none or fk.delete_action != .restrict) return error.UnsupportedForeignKey;
+    for ([_][]const u8{ fk.target_table_sql_name, fk.target_column_sql_name }) |name| {
+        if (name.len == 0 or std.mem.indexOfScalar(u8, name, 0) != null) return error.InvalidIdentifier;
+    }
+    const target = for (schema.tables) |table| {
+        if (std.ascii.eqlIgnoreCase(table.sql_name, fk.target_table_sql_name)) break table;
+    } else return error.InvalidForeignKey;
+    if (primaryKeyCount(target) != 1) return error.InvalidForeignKey;
+    const key = for (target.columns) |candidate| {
+        if (candidate.primary_key != .none) break candidate;
+    } else return error.InvalidForeignKey;
+    if (!std.ascii.eqlIgnoreCase(key.sql_name, fk.target_column_sql_name) or
+        key.type == .boolean or key.type != column.type) return error.InvalidForeignKey;
+    if (key.enum_values.len != column.enum_values.len) return error.InvalidForeignKey;
+    for (key.enum_values) |value| {
+        const found = for (column.enum_values) |local| {
+            if (std.mem.eql(u8, value, local)) break true;
+        } else false;
+        if (!found) return error.InvalidForeignKey;
+    }
 }
 
 /// Prefix every physical line, including CR-separated lines, so docs cannot

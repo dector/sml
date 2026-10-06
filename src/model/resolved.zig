@@ -78,6 +78,8 @@ pub const DeleteAction = enum { restrict, cascade, set_null };
 
 /// Resolved single-column FK metadata; SQL names are owned with the schema.
 /// The local Column carries the inherited logical type and enum allowed values.
+/// Public schemas must match the target's single PK by ASCII-case-insensitive
+/// SQL name, logical type, and exact enum value set. Emission preflights this.
 pub const ForeignKey = struct {
     target_table_sql_name: []const u8,
     target_column_sql_name: []const u8,

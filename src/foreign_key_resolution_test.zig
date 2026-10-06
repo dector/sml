@@ -73,8 +73,12 @@ fn pipeline(allocator: std.mem.Allocator) !void {
     try std.testing.expectEqual(@as(usize, 0), tables[3].indexes.len);
     var sql = std.Io.Writer.Allocating.init(allocator);
     defer sql.deinit();
-    try std.testing.expectError(error.UnsupportedForeignKey, emitter.emit(result.schema.schema, &sql.writer));
-    try std.testing.expectEqual(@as(usize, 0), sql.written().len);
+    emitter.emit(result.schema.schema, &sql.writer) catch |err| switch (err) {
+        error.WriteFailed => return error.OutOfMemory,
+        else => return err,
+    };
+    try std.testing.expect(std.mem.indexOf(u8, sql.written(), "REFERENCES \"Parent Exact\"(\"Key Exact\") ON DELETE RESTRICT") != null);
+    try std.testing.expect(std.mem.indexOf(u8, sql.written(), "REFERENCES \"node\"(\"id\") ON DELETE RESTRICT") != null);
 }
 
 test "forward self exact owned names inherited enum datetime defaults and local constraints" {
