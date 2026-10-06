@@ -255,26 +255,17 @@ fn preflightRelationships(schema: resolved.Schema) Error!void {
     for (schema.relationships, 0..) |r, n| {
         if (!@import("unique.zig").dslName(r.dsl_name) or
             r.owner_table_index >= schema.tables.len or r.target_table_index >= schema.tables.len or
-            r.source_table_index >= schema.tables.len or r.source_table_index != r.target_table_index)
+            r.source_table_index >= schema.tables.len)
             return error.InvalidRelationship;
         const owner = schema.tables[r.owner_table_index];
         const source = schema.tables[r.source_table_index];
-        if (r.backing_column_index >= source.columns.len) return error.InvalidRelationship;
+        try @import("relationship_validation.zig").validate(schema, r);
         for (owner.columns) |c| if (std.mem.eql(u8, c.dsl_name, r.dsl_name)) return error.InvalidRelationship;
         for (schema.relationships[0..n]) |prior| {
             if (prior.owner_table_index == r.owner_table_index and std.mem.eql(u8, prior.dsl_name, r.dsl_name)) return error.InvalidRelationship;
         }
-        if (primaryKeyCount(owner) != 1) return error.InvalidRelationship;
-        const key = for (owner.columns) |c| {
-            if (c.primary_key != .none) break c;
-        } else return error.InvalidRelationship;
         const column = source.columns[r.backing_column_index];
-        const fk = column.foreign_key orelse return error.InvalidRelationship;
-        if (!std.ascii.eqlIgnoreCase(fk.target_table_sql_name, owner.sql_name) or
-            !std.ascii.eqlIgnoreCase(fk.target_column_sql_name, key.sql_name) or key.nullable)
-            return error.InvalidRelationship;
-        validateForeignKey(schema, column, fk) catch return error.InvalidRelationship;
-        if (r.cardinality == .optional_one and !@import("unique.zig").singleColumn(source, r.backing_column_index)) return error.InvalidRelationship;
+        validateForeignKey(schema, column, column.foreign_key.?) catch return error.InvalidRelationship;
     }
 }
 

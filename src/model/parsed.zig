@@ -83,6 +83,7 @@ pub const Relationship = struct {
     collection: bool = false,
     source_table: Token,
     source_field: Token,
+    destination_field: ?Token = null,
     documentation: ?Documentation = null,
     /// Entire declaration, including `~` and the mapping, excluding comments.
     span: Span,

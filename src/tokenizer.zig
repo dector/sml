@@ -27,6 +27,7 @@ pub const Kind = enum {
     equal_equal,
     not_equal,
     less_than,
+    left_left,
     less_than_or_equal,
     greater_than,
     greater_than_or_equal,
@@ -114,6 +115,10 @@ pub const Tokenizer = struct {
             return self.token(.generator, start);
         }
         self.pos += 1;
+        if (c == '<' and self.pos < self.source.len and self.source[self.pos] == '<') {
+            self.pos += 1;
+            return self.token(.left_left, start);
+        }
         if ((c == '&' or c == '|') and self.pos < self.source.len and self.source[self.pos] == c) {
             self.pos += 1;
             return self.token(if (c == '&') .logical_and else .logical_or, start);

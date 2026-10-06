@@ -239,6 +239,14 @@ const Parser = struct {
         const source_table = try self.name();
         _ = try self.take(.dot, "Expected '.' in relationship source mapping @Table.field");
         const source_field = try self.name();
+        var destination_field: ?parsed.Token = null;
+        var mapping_end = source_field.span.end;
+        if (self.current.kind == .left_left) {
+            try self.advance();
+            const destination = try self.name();
+            destination_field = token(destination);
+            mapping_end = destination.span.end;
+        }
         try self.relationshipOptions();
         try self.lineEnd();
         if (self.current.indent > first.indent and (self.current.kind == .hash or self.current.kind == .question))
@@ -249,8 +257,9 @@ const Parser = struct {
             .collection = collection,
             .source_table = token(source_table),
             .source_field = token(source_field),
+            .destination_field = destination_field,
             .documentation = docs,
-            .span = .{ .start = first.span.start, .end = source_field.span.end },
+            .span = .{ .start = first.span.start, .end = mapping_end },
         };
     }
 

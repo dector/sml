@@ -150,7 +150,7 @@ They must be nullable, and their backing FK must have a single-column PK,
 field/table UNIQUE, or full single-column unique index. Composite keys and all
 partial indexes (even `#where true`) do not prove singular cardinality. Nullable
 backing FKs are allowed: multiple NULLs reference no owner. Collections must be
-nonnullable and need no uniqueness. Connection relationships remain unsupported.
+nonnullable and need no uniqueness.
 Relationships cannot carry defaults/directives. Public relationship metadata is
 validated across the whole schema before any SQL is written; invalid mappings,
 indices, names, collisions, or cardinality proofs return `InvalidRelationship`.
@@ -179,19 +179,37 @@ Repeated-table endpoints require distinct explicit roles. Resolved header-order
 endpoints bind `column_index`; repeated-table roles leave it null. Neither key
 names nor declaration order imply role-to-column binding. SQL preflights public
 connection metadata and returns `InvalidConnection` before output on violations.
-Nested endpoints, collections through connections, unnamed connections, and `~~`
-generated keys remain deferred.
+NamedConnections Slice3 supports endpoint mappings through declared connections:
+`~books Book[] @Borrow.reader` or `~following Reader[]
+@Following.leftReader <<rightReader`. The source field must be an endpoint PK FK
+to the owner. Destination candidates are the other endpoint PK FK fields to the
+declared target. Exactly one is inferred; multiple candidates require `<<field`.
+A hint names an exact stored **DSL field**, never a header role or SQL alias.
+Self-connections use different source/destination fields, with no role naming
+convention. Grammar: `~name Target[] @Connection.source [<<destination]` (or
+`Target?` for singular). Direct backrefs cannot carry hints. A different source
+and target requires a declared connection.
+
+Collections preserve connection tuples: there is no implicit deduplication or
+ordering. Nullable singular mappings require the source key alone to be globally
+unique (single-column PK/UNIQUE/full unique index); a composite connection PK
+alone does not suffice. The destination FK already identifies one target record.
+All relationships remain virtual and emit no SQL. Nested endpoints, unnamed
+connections, and `~~` generated keys remain deferred.
 
 Read `result.schema.schema.relationships` after resolution. Each entry has an
 owned `dsl_name`, declaration/documentation spans, optional documentation text,
 cardinality, and zero-based `owner_table_index`, `target_table_index`,
-`source_table_index`, and `backing_column_index`. Table indices refer to resolved
-`tables`; the backing index refers to the source table's stored `columns`, not
+`source_table_index`, `backing_column_index`, and optional
+`destination_column_index` (null for direct mappings, filled for every connection
+mapping, including inferred destinations). Table indices refer to resolved
+`tables`; both column indices refer to the source table's stored `columns`, not
 its interleaved declaration position. The resolved arena owns this metadata:
 parsed storage and source can be freed before reading it or emitting SQL.
 Direct mappings describe existing FKs. They are **not query loading** and create
 no SQL columns, constraints, tables, or indexes. Real FK index coverage is
-unchanged. Connections are next and remain unsupported.
+unchanged. Emitter preflight checks endpoint membership and FK directions;
+incomplete connection metadata is rejected, never inferred during emission.
 
 `expression_parser.parse(allocator, source)` separately parses one literal,
 ordinary identifier reference (`[A-Za-z_][A-Za-z0-9_]*`), or standalone `_`

@@ -129,6 +129,8 @@ pub const Relationship = struct {
     target_table_index: usize,
     source_table_index: usize,
     backing_column_index: usize,
+    /// Connection destination endpoint; null for direct backrefs.
+    destination_column_index: ?usize = null,
     cardinality: RelationshipCardinality,
     documentation: ?Documentation = null,
     span: ?@import("parsed.zig").Span = null,

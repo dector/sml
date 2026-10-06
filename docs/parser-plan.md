@@ -165,7 +165,7 @@ preserves docs/spans and table then relationship declaration order, without SQL
 objects or documentation placement. Direct singular mappings require nullable
 targets and a single-column uniqueness proof: PK, field/table UNIQUE, or full
 unique index. Composite proofs and all partial indexes are rejected. Nullable
-backing FKs are allowed. Connection mappings remain unsupported. Collections
+backing FKs are allowed. NamedConnections Slice3 adds endpoint mappings (below). Collections
 must be nonnullable, including manually built parsed models; they need no unique
 proof. Emitter preflight validates all public relationship bounds, exact DSL
 names/collisions, owner FK mappings, and singular proofs before any writes,
@@ -187,7 +187,7 @@ See `src/relationship_resolution_test.zig` for further ownership/OOM and mapping
 coverage. SQL documentation placement is still open, not part of this settled
 metadata-only implementation stage.
 Other generators, date/JSON, expression indexes, and
-connections come in later slices. Reusable types are deferred indefinitely.
+unnamed connections come in later slices. Reusable types are deferred indefinitely.
 Numeric exponent notation and multiline literals are deferred.
 
 ## Settled syntax
@@ -406,8 +406,21 @@ Extend syntax models, parser, resolver, emitter, and tests together:
 4. NamedConnections Slice2 implements named connections, roles, and explicit
    composite PK FK keys. Endpoint target multisets are validated by a shared
    resolver/emitter helper. Repeated-table role bindings remain null; explicit
-   key names/order do not imply roles. Nested endpoints, connection collections,
-   unnamed connections, generated keys, and destination hints remain deferred.
+   key names/order do not imply roles. Slice3 adds `~name Target[]
+   @Connection.source [<<destination]` and nullable singular `Target?` mappings.
+   Both mapping fields are exact DSL names, not SQL aliases or header roles.
+   Source must be an endpoint PK FK to the owner; a different destination key
+   must reference the declared target. Infer only a single matching candidate;
+   otherwise require an explicit hint or reject no match. Self/repeated-table
+   endpoints work without any role-to-key naming convention. Collections retain
+   tuples without implicit deduplication or ordering. Singular mappings require
+   globally unique source alone (the existing single-column uniqueness helper).
+   Owned relationship metadata stores the resolved destination index even when
+   inferred; shared resolver/emitter validation rejects incomplete public metadata
+   before SQL output. Direct destination hints are invalid. Tests cover forward
+   names, SQL overrides, ambiguity, spans, whole-model preflight, runtime tuple
+   semantics, and allocation failures. Nested endpoints, unnamed connections,
+   and `~~` generated keys remain deferred.
 5. Remaining directives and multiline literals after their rules are finalized.
 
 Do not build a full-v1 parser ahead of models and semantic support.

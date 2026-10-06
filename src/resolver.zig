@@ -493,14 +493,14 @@ const Context = struct {
                 const source = for (tables, 0..) |candidate, ti| {
                     if (std.mem.eql(u8, candidate.dsl_name, relationship.source_table.text)) break ti;
                 } else return self.fail(.unknown_relationship_source, relationship.source_table.span, "Unknown DSL table in relationship source");
-                if (tables[source].connection != null or tables[target].connection != null)
-                    return self.fail(.unsupported_connection_relationship, relationship.source_table.span, "Connection relationships are unsupported");
-                if (source != target)
-                    return self.fail(.unsupported_connection_relationship, relationship.source_table.span, "Connection relationships are unsupported: direct source table must equal target table");
+                if (tables[source].connection == null and source != target)
+                    return self.fail(.unsupported_connection_relationship, relationship.source_table.span, "Different source and target tables require a declared connection");
+                if (tables[source].connection == null and relationship.destination_field != null)
+                    return self.fail(.invalid_relationship_mapping, relationship.destination_field.?.span, "Direct backrefs cannot have a destination hint");
                 const backing = for (tables[source].columns, 0..) |column, ci| {
                     if (std.mem.eql(u8, column.dsl_name, relationship.source_field.text)) break ci;
                 } else return self.fail(.unknown_relationship_field, relationship.source_field.span, "Unknown stored DSL field in relationship source");
-                const fk = tables[source].columns[backing].foreign_key orelse
+                if (tables[source].columns[backing].foreign_key == null)
                     return self.fail(.invalid_relationship_mapping, relationship.source_field.span, "Relationship source must be a stored foreign-key field");
                 var pk: ?usize = null;
                 for (tables[owner].columns, 0..) |column, ci| {
@@ -509,18 +509,52 @@ const Context = struct {
                         return self.fail(.invalid_relationship_owner, relationship.span, "Relationship owner must have exactly one primary-key field");
                     pk = ci;
                 }
-                const key = pk orelse return self.fail(.invalid_relationship_owner, relationship.span, "Relationship owner must have exactly one primary-key field");
-                if (!std.mem.eql(u8, fk.target_table_sql_name, tables[owner].sql_name) or
-                    !std.mem.eql(u8, fk.target_column_sql_name, tables[owner].columns[key].sql_name))
+                if (pk == null) return self.fail(.invalid_relationship_owner, relationship.span, "Relationship owner must have exactly one primary-key field");
+                const validation = @import("relationship_validation.zig");
+                if (!validation.references(tables[source].columns[backing], tables[owner]))
                     return self.fail(.invalid_relationship_mapping, relationship.source_field.span, "Relationship source foreign key must reference the owner's single primary key");
                 if (!relationship.collection and !@import("unique.zig").singleColumn(tables[source], backing))
                     return self.fail(.invalid_relationship_mapping, relationship.source_field.span, "Singular relationship backing FK must be unique as a single column (not composite or partial)");
+                const mapping_schema: resolved.Schema = .{ .tables = tables };
+                var destination: ?usize = null;
+                if (tables[source].connection != null) {
+                    if (!validation.endpoint(mapping_schema, tables[source], backing, owner))
+                        return self.fail(.invalid_relationship_mapping, relationship.source_field.span, "Connection source must be an endpoint primary-key foreign key referencing the owner");
+                    if (relationship.destination_field) |hint| {
+                        destination = for (tables[source].columns, 0..) |column, ci| {
+                            if (std.mem.eql(u8, column.dsl_name, hint.text)) break ci;
+                        } else return self.fail(.unknown_relationship_field, hint.span, "Unknown stored DSL destination field");
+                        if (destination.? == backing or !validation.endpoint(mapping_schema, tables[source], destination.?, target))
+                            return self.fail(.invalid_relationship_mapping, hint.span, "Destination must be a different endpoint primary-key foreign key referencing the declared target");
+                    } else {
+                        for (tables[source].columns, 0..) |_, ci| {
+                            if (ci == backing or !validation.endpoint(mapping_schema, tables[source], ci, target)) continue;
+                            if (destination != null)
+                                return self.fail(.invalid_relationship_mapping, relationship.source_field.span, "Ambiguous connection destination; select a DSL field with <<field");
+                            destination = ci;
+                        }
+                        if (destination == null)
+                            return self.fail(.invalid_relationship_mapping, relationship.target.span, "Connection has no other endpoint key referencing the declared target");
+                    }
+                }
+                const mapping: resolved.Relationship = .{
+                    .dsl_name = relationship.name.text,
+                    .owner_table_index = owner,
+                    .target_table_index = target,
+                    .source_table_index = source,
+                    .backing_column_index = backing,
+                    .destination_column_index = destination,
+                    .cardinality = if (relationship.collection) .many else .optional_one,
+                };
+                validation.validate(mapping_schema, mapping) catch
+                    return self.fail(.invalid_relationship_mapping, relationship.span, "Invalid relationship mapping");
                 try output.append(self.allocator, .{
                     .dsl_name = try self.allocator.dupe(u8, relationship.name.text),
                     .owner_table_index = owner,
                     .target_table_index = target,
                     .source_table_index = source,
                     .backing_column_index = backing,
+                    .destination_column_index = destination,
                     .cardinality = if (relationship.collection) .many else .optional_one,
                     .documentation = try self.documentation(relationship.documentation),
                     .span = relationship.span,

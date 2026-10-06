@@ -114,7 +114,7 @@ test "public relationship preflight checks complete metadata before writes" {
     var result = try resolver.resolve(std.testing.allocator, syntax.schema.schema);
     defer result.schema.deinit();
     const original = result.schema.schema.relationships[0];
-    var variants: [15]resolved.Relationship = undefined;
+    var variants: [16]resolved.Relationship = undefined;
     @memset(&variants, original);
     variants[0].owner_table_index = 99;
     variants[1].target_table_index = 99;
@@ -131,6 +131,7 @@ test "public relationship preflight checks complete metadata before writes" {
     variants[12].dsl_name = "false";
     variants[13].dsl_name = "null";
     variants[14].dsl_name = "_";
+    variants[15].destination_column_index = 0;
     for (variants) |bad| {
         var schema = result.schema.schema;
         // A valid earlier relation must not cause any output before the bad one.
