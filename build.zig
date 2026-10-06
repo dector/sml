@@ -29,6 +29,19 @@ pub fn build(b: *std.Build) void {
     run.addPassthruArgs();
     b.step("run", "Run the sml compiler").dependOn(&run.step);
 
+    const fuzz_module = b.createModule(.{
+        .root_source_file = b.path("src/fuzz_main.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "sml", .module = module }},
+    });
+    const fuzz_executable = b.addExecutable(.{ .name = "sml-fuzz", .root_module = fuzz_module });
+    const fuzz_run = b.addRunArtifact(fuzz_executable);
+    fuzz_run.addPassthruArgs();
+    b.step("fuzz", "Run bounded deterministic parser/pipeline mutation fuzzing").dependOn(&fuzz_run.step);
+    const fuzz_tests = b.addTest(.{ .root_module = fuzz_module });
+    const run_fuzz_tests = b.addRunArtifact(fuzz_tests);
+
     const app_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/cli.zig"),
         .target = target,
@@ -41,4 +54,5 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run model and compiler tests");
     test_step.dependOn(&run_tests.step);
     test_step.dependOn(&run_app_tests.step);
+    test_step.dependOn(&run_fuzz_tests.step);
 }

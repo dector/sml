@@ -498,6 +498,53 @@ validates CHECK roots before any SQL is written. It does not duplicate resolver 
 trusted SQL. Writer failures return `error.WriteFailed` and may leave partial
 output; callers own and flush the writer.
 
+## Deterministic parser/pipeline fuzzing
+
+```sh
+zig build fuzz -- --iterations 1000
+zig build fuzz -- --seed 5265996 --iterations 10000
+zig build fuzz -- --seed 5265996 --replay 695 --max-bytes 8192
+# For campaigns where a panic must leave the current input on disk:
+zig build fuzz -- --seed 5265996 --iterations 10000 --repro-dump /tmp/pzl-current.pzl
+zig build fuzz -- --help
+```
+
+This standalone harness does not change or invoke the CLI. It fuzzes the public
+parser, resolver and SQL emitter, including emitter preflight and sanitized
+diagnostic formatting. Each case uses a leak-checked `DebugAllocator`; parsed
+and resolved arenas and allocating writers are freed before checking for leaks.
+Allocation failures, out-of-bounds diagnostic spans and emitter failures stop
+the run. SQL is **not executed or syntax-validated** here: raw SQL is trusted,
+and documentation comments preserve source bytes (including malformed UTF-8).
+The Python runtime tests below cover SQLite separately.
+
+Defaults: seed **5265996**, **10000** iterations, **8192** source bytes. All numeric
+options accept decimal unsigned integers only. `--max-bytes` accepts **1..8192**;
+`--iterations` must be positive. `--replay N` runs only zero-based case N and
+cannot be combined with `--iterations`. Replay needs the same seed, source bound
+and harness revision; each index has an independent, fixed SplitMix64 stream.
+
+Seeds embed twelve representative `src/testdata/parser/*.sml` fixtures (the
+repository uses `.sml`, not `.pzl`). Add fixtures to `corpus` in `src/fuzz.zig` to
+extend it; this changes replay identity. Mutations include corpus splicing,
+deletions, insertions, bit flips, repeated delimiters/controls, prefix trimming,
+and syntax tokens. Other cases use arbitrary bytes, comments/invalid UTF-8,
+unterminated strings at the source bound, 255/256/257 nested groups, and long
+comparator/Boolean chains. Normal `zig build test` runs only small bounded
+smokes (100 mutations plus fixtures and focused cases), never a campaign.
+
+On a returned failure the harness reports seed/index/bound and writes exact
+bytes to `fuzz-failure.pzl`, or the `--failure PATH` path. Creation is exclusive:
+an existing artifact is never overwritten. If writing fails, exact input hex
+is printed instead. Panics cannot be caught: opt in to `--repro-dump PATH` to
+**overwrite that path before every case**, with the matching replay command
+parameters logged to stderr. Use a disposable path; the final bytes then survive
+panics/leaks. Artifact contents are arbitrary binary data, not necessarily text.
+
+This is **deterministic mutation fuzzing, not coverage-guided fuzzing**. Zig
+0.17 provides `std.testing.fuzz` with a `Smith` callback API, but this harness
+has no native coverage-guided target and requires no additional dependencies.
+
 ## Development
 
 Use Zig 0.17.0.
